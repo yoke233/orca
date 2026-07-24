@@ -43,6 +43,7 @@ function isActiveExistingIdentity(
 export function resolveAgentStatusIdentity(args: {
   existing?: ExistingAgentIdentity
   incoming?: AgentType
+  sameLaunchOwner?: boolean
   now: number
   staleAfterMs?: number
 }): AgentIdentityResolution {
@@ -62,11 +63,9 @@ export function resolveAgentStatusIdentity(args: {
       inheritedFromActivePane: false
     }
   }
-  if (isActiveExistingIdentity(args.existing, args.now, staleAfterMs)) {
+  if (args.sameLaunchOwner || isActiveExistingIdentity(args.existing, args.now, staleAfterMs)) {
     return {
-      // Why: child agent CLIs inherit ORCA_PANE_KEY from their parent terminal.
-      // While the parent turn is active, do not let a nested hook steal the
-      // pane's visible identity.
+      // Why: child agent CLIs inherit the root's pane and launch identities.
       agentType: existingAgentType,
       inheritedFromActivePane: true
     }

@@ -888,6 +888,9 @@ export class AgentHookServer {
           }
         : undefined,
       incoming: rootContextPreservingPayload.payload.agentType,
+      sameLaunchOwner:
+        previous?.launchToken !== undefined &&
+        previous.launchToken === rootContextPreservingPayload.launchToken,
       now
     })
     if (
@@ -904,6 +907,7 @@ export class AgentHookServer {
         ? rootContextPreservingPayload
         : {
             ...rootContextPreservingPayload,
+            providerSession: previous?.providerSession,
             payload: {
               ...rootContextPreservingPayload.payload,
               agentType: identity.agentType
