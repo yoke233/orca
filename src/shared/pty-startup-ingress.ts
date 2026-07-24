@@ -43,6 +43,7 @@ export class PtyStartupIngress {
   private processing = false
   private closed = false
   private queryOpen: boolean
+  private queryCloseRequested = false
   private rawHighWater = 0
   private queryPending: PtyIngressSourceSpan | null = null
   private echoPending: PtyIngressSourceSpan | null = null
@@ -120,13 +121,21 @@ export class PtyStartupIngress {
         return
       case 'close-query':
         if (this.ownerBackend !== 'windows-conpty') {
-          this.queryOpen = false
-          this.releaseQueryPending()
+          if (!this.intent || this.answeredSlots.size > 0) {
+            this.queryOpen = false
+            this.releaseQueryPending()
+          } else {
+            // Why: a view can become visible before the launched TUI writes its
+            // startup probe. Keep the source owner through that first query so
+            // its reply is queued before a following DA1 sentinel.
+            this.queryCloseRequested = true
+          }
         }
         // Why: ConPTY cannot safely transfer color-query authority to a downstream view.
         return
       case 'expire':
         this.queryOpen = false
+        this.queryCloseRequested = false
         this.releaseEchoPending()
         if (this.ownerBackend !== 'windows-conpty') {
           this.releaseQueryPending()
@@ -139,6 +148,7 @@ export class PtyStartupIngress {
         return
       case 'teardown':
         this.queryOpen = false
+        this.queryCloseRequested = false
         this.releaseAllPending()
         this.expectedEchoes.length = 0
         this.clearDeadline()
@@ -262,8 +272,9 @@ export class PtyStartupIngress {
       }
     }
 
-    if (this.answeredSlots.has(10) && this.answeredSlots.has(11)) {
+    if (this.queryCloseRequested || (this.answeredSlots.has(10) && this.answeredSlots.has(11))) {
       this.queryOpen = false
+      this.queryCloseRequested = false
     }
     return wroteAny
   }
