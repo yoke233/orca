@@ -16,6 +16,7 @@ const {
   prunePackagedSherpaOnnx,
   prunePackagedRuntimeTypeDeclarations,
   prunePackagedZodSources,
+  verifyPackagedMainRelativeExports,
   verifyPackagedMainRuntimeDeps
 } = require('../packaged-runtime-node-modules.cjs')
 
@@ -196,6 +197,26 @@ describe('electron-builder config', () => {
   it('recognizes Electron original-fs as a packaged runtime builtin', () => {
     expect(isPackagedExternalSpecifier('original-fs')).toBe(false)
     expect(isPackagedExternalSpecifier('yaml')).toBe(true)
+  })
+
+  it('rejects packaged main calls missing from a relative runtime entry', () => {
+    const sources = new Map([
+      [
+        'out/main/index.js',
+        'const managed = require("./agent-hooks/managed-agent-hook-controls.js"); managed.resolveGrokSessionsDir()'
+      ],
+      [
+        'out/main/agent-hooks/managed-agent-hook-controls.js',
+        'exports.isAgentStatusHooksEnabled = isAgentStatusHooksEnabled'
+      ]
+    ])
+    const asar = {
+      extractFile: (_asarPath, internalPath) => Buffer.from(sources.get(internalPath), 'utf8')
+    }
+
+    expect(() => verifyPackagedMainRelativeExports('app.asar', [...sources.keys()], asar)).toThrow(
+      'Packaged main bundle calls missing exports from out/main/agent-hooks/managed-agent-hook-controls.js: resolveGrokSessionsDir'
+    )
   })
 
   it('normalizes host-specific asar entry separators', () => {

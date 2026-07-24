@@ -7,7 +7,7 @@ const {
   realpathSync,
   rmSync
 } = require('node:fs')
-const { dirname, join, resolve } = require('node:path')
+const { dirname, join, posix, resolve } = require('node:path')
 const { builtinModules, createRequire } = require('node:module')
 
 const projectDir = resolve(__dirname, '..')
@@ -205,6 +205,49 @@ function findAsarEntry(entries, expectedPath) {
   return entries.find((entry) => normalizeAsarEntryPath(entry) === expectedPath)
 }
 
+function verifyPackagedMainRelativeExports(asarPath, entries, asar) {
+  const sourceByPath = new Map()
+  const readSource = (file) => {
+    const cached = sourceByPath.get(file)
+    if (cached !== undefined) {
+      return cached
+    }
+    const entry = findAsarEntry(entries, file)
+    if (!entry) {
+      throw new Error(`Packaged main file ${file} was not found in ${asarPath}`)
+    }
+    const source = asar.extractFile(asarPath, entry.replace(/^[\\/]+/, '')).toString('utf8')
+    sourceByPath.set(file, source)
+    return source
+  }
+
+  const mainFile = 'out/main/index.js'
+  const mainSource = readSource(mainFile)
+  for (const match of mainSource.matchAll(
+    /const\s+([A-Za-z_$][\w$]*)\s*=\s*require\(["'](\.[^"']+\.js)["']\)/g
+  )) {
+    const [, namespace, specifier] = match
+    const requiredPath = posix.normalize(posix.join(posix.dirname(mainFile), specifier))
+    const requiredSource = readSource(requiredPath)
+    const missing = new Set()
+    const memberPattern = new RegExp(`\\b${namespace}\\.([A-Za-z_$][\\w$]*)`, 'g')
+    for (const memberMatch of mainSource.matchAll(memberPattern)) {
+      const member = memberMatch[1]
+      const exported =
+        new RegExp(`\\bexports\\.${member}\\s*=`).test(requiredSource) ||
+        new RegExp(`Object\\.defineProperty\\(exports,\\s*["']${member}["']`).test(requiredSource)
+      if (!exported) {
+        missing.add(member)
+      }
+    }
+    if (missing.size > 0) {
+      throw new Error(
+        `Packaged main bundle calls missing exports from ${requiredPath}: ${[...missing].join(', ')}`
+      )
+    }
+  }
+}
+
 function verifyPackagedMainRuntimeDeps(resourcesDir, asar = require('@electron/asar')) {
   const asarPath = join(resourcesDir, 'app.asar')
   if (!existsSync(asarPath)) {
@@ -214,6 +257,8 @@ function verifyPackagedMainRuntimeDeps(resourcesDir, asar = require('@electron/a
   const mainFiles = ['out/main/index.js', 'out/main/agent-hooks/managed-agent-hook-controls.js']
   const entries = asar.listPackage(asarPath)
   const missing = new Set()
+
+  verifyPackagedMainRelativeExports(asarPath, entries, asar)
 
   for (const file of mainFiles) {
     const entry = findAsarEntry(entries, file)
@@ -426,5 +471,6 @@ module.exports = {
   prunePackagedSherpaOnnx,
   prunePackagedRuntimeTypeDeclarations,
   prunePackagedZodSources,
+  verifyPackagedMainRelativeExports,
   verifyPackagedMainRuntimeDeps
 }
