@@ -10,6 +10,7 @@ const electronBuilderNativeRebuild = require('./electron-builder-native-rebuild.
 const {
   createPackagedRuntimeNodeModuleResources,
   findAsarEntry,
+  isPackagedExternalSpecifier,
   prunePackagedNodePty,
   prunePackagedParcelWatcher,
   prunePackagedSherpaOnnx,
@@ -190,6 +191,11 @@ describe('electron-builder config', () => {
     } finally {
       await rm(resourcesDir, { recursive: true, force: true })
     }
+  })
+
+  it('recognizes Electron original-fs as a packaged runtime builtin', () => {
+    expect(isPackagedExternalSpecifier('original-fs')).toBe(false)
+    expect(isPackagedExternalSpecifier('yaml')).toBe(true)
   })
 
   it('normalizes host-specific asar entry separators', () => {
