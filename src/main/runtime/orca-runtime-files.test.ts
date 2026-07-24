@@ -14,6 +14,7 @@ import type * as GitRunner from '../git/runner'
 const {
   lstatMock,
   openMock,
+  readFileMock,
   readdirMock,
   renameMock,
   resolveAuthorizedPathMock,
@@ -29,6 +30,7 @@ const {
   getLocalGitOptionsForRegisteredWorktreeMock: vi.fn(),
   lstatMock: vi.fn(),
   openMock: vi.fn(),
+  readFileMock: vi.fn(),
   readdirMock: vi.fn(),
   renameMock: vi.fn(),
   resolveAuthorizedPathMock: vi.fn(),
@@ -55,6 +57,10 @@ vi.mock('fs/promises', async () => {
     open: (...args: Parameters<typeof actual.open>) => {
       const impl = openMock.getMockImplementation()
       return impl ? openMock(...args) : actual.open(...args)
+    },
+    readFile: (...args: Parameters<typeof actual.readFile>) => {
+      const impl = readFileMock.getMockImplementation()
+      return impl ? readFileMock(...args) : actual.readFile(...args)
     },
     readdir: readdirMock,
     rename: renameMock,
@@ -202,6 +208,7 @@ describe('RuntimeFileCommands', () => {
     vi.useFakeTimers()
     lstatMock.mockReset()
     openMock.mockReset()
+    readFileMock.mockReset()
     readdirMock.mockReset()
     renameMock.mockReset()
     resolveAuthorizedPathMock.mockReset()
@@ -366,6 +373,33 @@ describe('RuntimeFileCommands', () => {
       { name: 'README.md', isDirectory: false, isSymlink: false }
     ])
     expect(statMock).not.toHaveBeenCalledWith('/repo/linked-docs')
+  })
+
+  it('keeps runtime workspace ASAR stat, preview, and readDir on file semantics', async () => {
+    const archivePath = '/repo/构建 产物.asar'
+    const archiveBytes = Buffer.from([0x00, 0x01, 0x02])
+    const { commands } = createRuntimeFileCommands()
+    resolveAuthorizedPathMock.mockResolvedValue(archivePath)
+    statMock.mockResolvedValue({
+      size: archiveBytes.byteLength,
+      isDirectory: () => false,
+      mtimeMs: 123
+    })
+    readFileMock.mockResolvedValue(archiveBytes)
+    readdirMock.mockRejectedValue(Object.assign(new Error('not a directory'), { code: 'ENOTDIR' }))
+
+    await expect(commands.statRuntimeFile('id:wt-1', '构建 产物.asar')).resolves.toEqual({
+      size: archiveBytes.byteLength,
+      isDirectory: false,
+      mtime: 123
+    })
+    await expect(commands.readFileExplorerPreview('id:wt-1', '构建 产物.asar')).resolves.toEqual({
+      content: '',
+      isBinary: true
+    })
+    await expect(commands.readFileExplorerDir('id:wt-1', '构建 产物.asar')).rejects.toMatchObject({
+      code: 'ENOTDIR'
+    })
   })
 
   it('renames a runtime-local file when destination does not exist', async () => {

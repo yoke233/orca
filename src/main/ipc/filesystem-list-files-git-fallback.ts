@@ -12,6 +12,7 @@ import {
   parseQuickOpenGitLsFilesEntry
 } from '../../shared/quick-open-readdir-walk'
 import { fileListingCancellationError } from '../../shared/file-listing-cancellation'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 /**
  * Fallback file lister using git ls-files. Used when rg is not available.
@@ -89,6 +90,7 @@ export async function listFilesWithGit(
     return listQuickOpenFilesWithReaddir(rootPath, {
       excludePathPrefixes,
       budget: createQuickOpenReaddirBudget(),
+      filesystem: workspaceFsPromises,
       maxResults,
       signal
     })
@@ -294,6 +296,7 @@ export async function listFilesWithGit(
     gitPaths,
     directoryPaths,
     excludePathPrefixes,
+    filesystem: workspaceFsPromises,
     signal,
     maxResults
   })

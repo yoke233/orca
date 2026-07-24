@@ -176,6 +176,8 @@ export default defineConfig({
         exclude: ['@xterm/headless', '@xterm/addon-serialize']
       },
       rollupOptions: {
+        // Electron resolves this builtin at runtime; Rollup cannot resolve it as a package.
+        external: ['original-fs'],
         input: {
           index: resolve('src/main/index.ts'),
           'daemon-entry': resolve('src/main/daemon/daemon-entry.ts'),

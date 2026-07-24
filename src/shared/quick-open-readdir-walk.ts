@@ -1,4 +1,4 @@
-import { lstat, readdir } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { throwIfFileListingCancelled } from './file-listing-cancellation'
 import { isQuickOpenReadableDirectory } from './quick-open-directory-validation'
@@ -23,6 +23,8 @@ export {
 } from './quick-open-readdir-budget'
 
 const QUICK_OPEN_READDIR_CONCURRENCY = 32
+
+export type QuickOpenFilesystem = Pick<typeof nodeFsPromises, 'lstat' | 'readdir'>
 
 export type QuickOpenGitEntryKind = 'keep' | 'fill-nested-repo' | 'drop-placeholder'
 
@@ -85,9 +87,9 @@ function rebaseExcludePrefixesForSubtree(
   return rebased
 }
 
-async function hasGitEntry(absPath: string): Promise<boolean> {
+async function hasGitEntry(absPath: string, fs: QuickOpenFilesystem = nodeFsPromises) {
   try {
-    const stat = await lstat(join(absPath, '.git'))
+    const stat = await fs.lstat(join(absPath, '.git'))
     return stat.isDirectory() || stat.isFile()
   } catch {
     return false
@@ -96,7 +98,8 @@ async function hasGitEntry(absPath: string): Promise<boolean> {
 
 export async function classifyQuickOpenGitEntry(
   rootPath: string,
-  entry: string
+  entry: string,
+  filesystem: QuickOpenFilesystem = nodeFsPromises
 ): Promise<{ kind: QuickOpenGitEntryKind; relPath: string }> {
   const parsed = parseQuickOpenGitLsFilesEntry(entry)
   const relPath = normalizeGitEntry(parsed.path)
@@ -110,7 +113,7 @@ export async function classifyQuickOpenGitEntry(
 
   let stat
   try {
-    stat = await lstat(joinRootRel(rootPath, relPath))
+    stat = await filesystem.lstat(joinRootRel(rootPath, relPath))
   } catch {
     return { kind: 'drop-placeholder', relPath }
   }
@@ -119,7 +122,7 @@ export async function classifyQuickOpenGitEntry(
     return { kind: 'drop-placeholder', relPath }
   }
 
-  if (await hasGitEntry(joinRootRel(rootPath, relPath))) {
+  if (await hasGitEntry(joinRootRel(rootPath, relPath), filesystem)) {
     return { kind: 'fill-nested-repo', relPath }
   }
 
@@ -132,6 +135,7 @@ export async function listQuickOpenFilesWithReaddir(
     excludePathPrefixes?: readonly string[]
     workspaceRelPathPrefix?: string
     budget?: QuickOpenReaddirBudget
+    filesystem?: QuickOpenFilesystem
     maxResults?: number
     signal?: AbortSignal
   } = {}
@@ -146,6 +150,7 @@ export async function listQuickOpenFilesWithReaddir(
       }
     ],
     opts.budget ?? createQuickOpenReaddirBudget(),
+    opts.filesystem ?? nodeFsPromises,
     opts.signal,
     opts.maxResults
   )
@@ -163,6 +168,7 @@ type QuickOpenReaddirRoot = {
 async function listQuickOpenFilesFromRoots(
   roots: readonly QuickOpenReaddirRoot[],
   budget: QuickOpenReaddirBudget,
+  fs: QuickOpenFilesystem,
   signal?: AbortSignal,
   maxResults?: number
 ): Promise<string[]> {
@@ -194,15 +200,15 @@ async function listQuickOpenFilesFromRoots(
           try {
             // Why: Git's placeholder may have been replaced with a symlink
             // before expansion. Never let readdir follow it outside the root.
-            const stat = await lstat(pending.absPath)
+            const stat = await fs.lstat(pending.absPath)
             const allowSymlinkedRoot = pending.isRoot && pending.root.allowRootSymlink
             if (!isQuickOpenReadableDirectory(stat, allowSymlinkedRoot)) {
               return { pending, entries: [] }
             }
-            const entries = await readdir(pending.absPath, { withFileTypes: true })
+            const entries = await fs.readdir(pending.absPath, { withFileTypes: true })
             // Why: close the ordinary check/use race. If the directory became
             // a symlink while readdir was pending, discard everything read.
-            const statAfterRead = await lstat(pending.absPath)
+            const statAfterRead = await fs.lstat(pending.absPath)
             if (!isQuickOpenReadableDirectory(statAfterRead, allowSymlinkedRoot)) {
               return { pending, entries: [] }
             }
@@ -269,6 +275,7 @@ export async function expandQuickOpenGitFileListing(opts: {
   directoryPaths?: Iterable<string>
   excludePathPrefixes?: readonly string[]
   budget?: QuickOpenReaddirBudget
+  filesystem?: QuickOpenFilesystem
   maxResults?: number
   signal?: AbortSignal
 }): Promise<string[]> {
@@ -293,7 +300,11 @@ export async function expandQuickOpenGitFileListing(opts: {
     throwIfFileListingCancelled(opts.signal)
     assertQuickOpenReaddirDeadline(budget)
 
-    const { kind, relPath } = await classifyQuickOpenGitEntry(opts.rootPath, rawPath)
+    const { kind, relPath } = await classifyQuickOpenGitEntry(
+      opts.rootPath,
+      rawPath,
+      opts.filesystem
+    )
     if (kind === 'keep') {
       addFinalPath(relPath)
       continue
@@ -338,6 +349,7 @@ export async function expandQuickOpenGitFileListing(opts: {
       includeSymlinks
     })),
     budget,
+    opts.filesystem ?? nodeFsPromises,
     opts.signal,
     opts.maxResults === undefined ? undefined : Math.max(0, opts.maxResults - files.size)
   )

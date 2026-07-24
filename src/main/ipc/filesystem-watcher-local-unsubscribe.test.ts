@@ -15,6 +15,10 @@ vi.mock('fs/promises', () => ({
   stat: vi.fn()
 }))
 
+vi.mock('../workspace-filesystem', async () => ({
+  workspaceFsPromises: await import('node:fs/promises')
+}))
+
 vi.mock('@parcel/watcher', () => ({
   subscribe: vi.fn()
 }))

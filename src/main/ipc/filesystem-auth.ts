@@ -1,8 +1,7 @@
 /* eslint-disable max-lines -- Why: keeps the filesystem-auth security boundary auditable end to end. */
 import { resolve, relative, dirname, basename, isAbsolute, sep } from 'node:path'
-import { realpathSync } from 'node:fs'
-import { realpath } from 'node:fs/promises'
 import type { Store } from '../persistence'
+import { workspaceFs, workspaceFsPromises } from '../workspace-filesystem'
 import { isRepoRoot, listRepoWorktrees } from '../repo-worktrees'
 import { computeWorkspaceRoot, getWorktreePathSettings } from './worktree-logic'
 import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
@@ -41,7 +40,7 @@ export function authorizeExternalPath(targetPath: string): void {
   rememberAuthorizedExternalPath(resolvedTarget)
   try {
     // Why: macOS canonicalizes /tmp to /private/tmp during read authorization.
-    rememberAuthorizedExternalPath(realpathSync(resolvedTarget))
+    rememberAuthorizedExternalPath(workspaceFs.realpathSync(resolvedTarget))
   } catch {}
 }
 
@@ -300,7 +299,7 @@ export async function resolveAuthorizedPath(
     // Canonicalize the parent so ancestor symlinks can't redirect outside allowed roots, but keep the leaf so delete/rename act on the link itself.
     let realParent: string
     try {
-      realParent = await realpath(dirname(resolvedTarget))
+      realParent = await workspaceFsPromises.realpath(dirname(resolvedTarget))
     } catch (error) {
       if (isENOENT(error)) {
         return resolveAuthorizedMissingPath(resolvedTarget, store)
@@ -320,7 +319,7 @@ export async function resolveAuthorizedPath(
 
   try {
     // Why: Windows/WSL realpath can return UNC-shaped paths; re-resolve to compare against this module's allow-list roots.
-    const realTarget = resolve(await realpath(resolvedTarget))
+    const realTarget = resolve(await workspaceFsPromises.realpath(resolvedTarget))
     if (
       !(await isPathAllowedIncludingRegisteredWorktrees(realTarget, store, {
         canonicalSourcePath: resolvedTarget
@@ -343,7 +342,7 @@ async function resolveAuthorizedMissingPath(resolvedTarget: string, store: Store
 
   while (true) {
     try {
-      const realAncestor = await realpath(existingAncestor)
+      const realAncestor = await workspaceFsPromises.realpath(existingAncestor)
       const candidateTarget = resolve(realAncestor, ...missingSegments)
       if (
         !(await isPathAllowedIncludingRegisteredWorktrees(candidateTarget, store, {
@@ -518,7 +517,7 @@ function findRegisteredWorktreeRoot(targetPath: string): string | null {
 
 async function normalizeExistingPath(resolvedPath: string): Promise<string> {
   try {
-    return resolve(await realpath(resolvedPath))
+    return resolve(await workspaceFsPromises.realpath(resolvedPath))
   } catch (error) {
     if (isENOENT(error)) {
       return resolvedPath

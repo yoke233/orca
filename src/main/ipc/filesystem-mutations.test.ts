@@ -171,6 +171,21 @@ describe('registerFilesystemMutationHandlers', () => {
     expect(renameMock).toHaveBeenCalledWith(oldPath, newPath)
   })
 
+  it('uses ordinary-file preflight when renaming an ASAR', async () => {
+    const oldPath = path.resolve('/workspace/repo/构建 产物.asar')
+    const newPath = path.resolve('/workspace/repo/rebuilt.asar')
+    lstatMock.mockImplementation(async (targetPath: string) => {
+      if (targetPath === oldPath) {
+        return mockStats(1, 10)
+      }
+      throw enoent()
+    })
+
+    await handlers.get('fs:rename')!(null, { oldPath, newPath })
+
+    expect(renameMock).toHaveBeenCalledWith(oldPath, newPath)
+  })
+
   it('rejects rename when destination already exists as a true collision', async () => {
     const oldPath = path.resolve('/workspace/repo/old.ts')
     const resolvedNewPath = path.resolve('/workspace/repo/new.ts')

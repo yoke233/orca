@@ -91,7 +91,7 @@ import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fe
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { resolveWorktreeCreateBase } from '../worktree-create-base'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree-base-ref'
 import { OrchestrationDb } from './orchestration/db'
@@ -103,6 +103,7 @@ import type {
   AutomationUpdateInput,
   AutomationWorkspaceMode
 } from '../../shared/automations-types'
+
 import type {
   AutomationWorkspaceProvenance,
   BaseRefSearchResult,
@@ -2107,7 +2108,7 @@ async function getSelectedHostedReviewForBranch(
 
 async function pathExists(pathValue: string): Promise<boolean> {
   try {
-    await stat(pathValue)
+    await workspaceFsPromises.stat(pathValue)
     return true
   } catch (error) {
     if (isENOENT(error)) {
@@ -15110,11 +15111,11 @@ export class OrcaRuntimeService {
 
   async browseServerDir(pathValue: string): Promise<{ resolvedPath: string; entries: DirEntry[] }> {
     const dirPath = resolveServerBrowsePath(pathValue)
-    const dirStat = await stat(dirPath)
+    const dirStat = await workspaceFsPromises.stat(dirPath)
     if (!dirStat.isDirectory()) {
       throw new Error(`${dirPath} is not a directory`)
     }
-    const entries = await readdir(dirPath, { withFileTypes: true })
+    const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     const mapped = entries
       .filter((entry) => entry.name !== '.' && entry.name !== '..')
       .map((entry) => ({
@@ -15390,8 +15391,8 @@ export class OrcaRuntimeService {
     try {
       // Why: default create-project parents are host-home based and may not exist
       // before the first project is created on a fresh runtime.
-      await mkdir(trimmedParentPath, { recursive: true })
-      const existingStat = await stat(targetPath).catch((error: unknown) => {
+      await workspaceFsPromises.mkdir(trimmedParentPath, { recursive: true })
+      const existingStat = await workspaceFsPromises.stat(targetPath).catch((error: unknown) => {
         if (isENOENT(error)) {
           return null
         }
@@ -15401,12 +15402,12 @@ export class OrcaRuntimeService {
         if (!existingStat.isDirectory()) {
           return { error: `"${trimmedName}" already exists at this location and is not a folder.` }
         }
-        const entries = await readdir(targetPath)
+        const entries = await workspaceFsPromises.readdir(targetPath)
         if (entries.length > 0) {
           return { error: `"${trimmedName}" already exists at this location and is not empty.` }
         }
       } else {
-        await mkdir(targetPath, { recursive: false })
+        await workspaceFsPromises.mkdir(targetPath, { recursive: false })
         createdDir = true
       }
     } catch (error) {
@@ -15424,9 +15425,11 @@ export class OrcaRuntimeService {
         })
       } catch (error) {
         if (createdDir) {
-          await rm(targetPath, { recursive: true, force: true }).catch(() => {})
+          await workspaceFsPromises.rm(targetPath, { recursive: true, force: true }).catch(() => {})
         } else if (step === 'commit') {
-          await rm(join(targetPath, '.git'), { recursive: true, force: true }).catch(() => {})
+          await workspaceFsPromises
+            .rm(join(targetPath, '.git'), { recursive: true, force: true })
+            .catch(() => {})
         }
         const message = error instanceof Error ? error.message : String(error)
         if (
@@ -15544,7 +15547,7 @@ export class OrcaRuntimeService {
       return existingBeforeClone
     }
 
-    await mkdir(trimmedDestination, { recursive: true })
+    await workspaceFsPromises.mkdir(trimmedDestination, { recursive: true })
     const claimedTarget = await claimCloneTarget(clonePath)
     await new Promise<void>((resolve, reject) => {
       let proc: ReturnType<typeof gitSpawn>
@@ -17217,7 +17220,7 @@ export class OrcaRuntimeService {
       }
 
       try {
-        return await readFile(filePath, 'utf-8')
+        return await workspaceFsPromises.readFile(filePath, 'utf-8')
       } catch (error) {
         if (!isENOENT(error)) {
           console.warn('[runtime] Failed to inspect setup script import candidate:', error)

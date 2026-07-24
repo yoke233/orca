@@ -1,4 +1,3 @@
-import { lstat } from 'node:fs/promises'
 import { basename, posix, resolve } from 'node:path'
 import { authorizeExternalPath, isENOENT } from './filesystem-auth'
 import { getSshConnectionManager } from './ssh'
@@ -12,6 +11,7 @@ import {
   preScanSshImportDirectory,
   uploadSshImportDirectory
 } from './filesystem-import-ssh-directory'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 // Why: the SSH import path uses SshFilesystemProvider instead of direct SFTP so
 // system-SSH transports (ProxyCommand/ProxyJump/FIDO2) get the same workflows.
@@ -109,9 +109,9 @@ async function importOneSourceSsh(
     }
   }
 
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }

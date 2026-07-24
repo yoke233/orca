@@ -1,14 +1,14 @@
-import { lstat, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import type { FileUploadSession, IFilesystemProvider } from '../providers/types'
 import { assertSafeRemotePathSegment, type RemotePathFlavor } from '../ssh/ssh-remote-platform'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export async function captureLocalUploadRoot(
   sourcePath: string,
-  sourceStat: Awaited<ReturnType<typeof lstat>>
+  sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
 ): Promise<string> {
-  const rootRealPath = await realpath(sourcePath)
-  const rootRealStat = await lstat(rootRealPath)
+  const rootRealPath = await workspaceFsPromises.realpath(sourcePath)
+  const rootRealStat = await workspaceFsPromises.lstat(rootRealPath)
   if (
     statIdentityPartChanged(sourceStat.ino, rootRealStat.ino) ||
     statIdentityPartChanged(sourceStat.dev, rootRealStat.dev) ||
@@ -23,7 +23,7 @@ export async function preScanSshImportDirectory(
   dirPath: string,
   remotePathFlavor: RemotePathFlavor
 ): Promise<boolean> {
-  const entries = await readdir(dirPath, { withFileTypes: true })
+  const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
   for (const entry of entries) {
     assertSafeRemotePathSegment(entry.name, remotePathFlavor)
     if (entry.isSymbolicLink()) {
@@ -49,13 +49,13 @@ export async function uploadSshImportDirectory(
   assertCurrent?: () => void
 ): Promise<void> {
   await assertLocalUploadPathInsideRoot(rootRealPath, localDir)
-  const entries = await readdir(localDir, { withFileTypes: true })
+  const entries = await workspaceFsPromises.readdir(localDir, { withFileTypes: true })
   for (const entry of entries) {
     assertSafeRemotePathSegment(entry.name, remotePathFlavor)
     const localPath = join(localDir, entry.name)
     const remotePath = `${remoteDir}/${entry.name}`
     await assertLocalUploadPathInsideRoot(rootRealPath, localPath)
-    const statResult = await lstat(localPath)
+    const statResult = await workspaceFsPromises.lstat(localPath)
 
     // Why: skip symlinks and special files even after the up-front pre-scan;
     // this closes the TOCTOU gap if one is created during upload.
@@ -95,7 +95,7 @@ async function assertLocalUploadPathInsideRoot(
   rootRealPath: string,
   candidatePath: string
 ): Promise<void> {
-  const candidateRealPath = await realpath(candidatePath)
+  const candidateRealPath = await workspaceFsPromises.realpath(candidatePath)
   const relativeToRoot = relative(rootRealPath, candidateRealPath)
   if (
     relativeToRoot !== '' &&

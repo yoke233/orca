@@ -1,7 +1,6 @@
 /* eslint-disable max-lines -- Why: one module keeps native (@parcel/watcher), WSL-snapshot, and SSH watcher lifecycle invariants and shared debounce/coalesce helpers auditable in one file. */
 import { ipcMain, type WebContents } from 'electron'
 import * as path from 'node:path'
-import { stat } from 'node:fs/promises'
 import type { Event as WatcherEvent } from '@parcel/watcher'
 import type { FsChangeEvent, FsChangedPayload } from '../../shared/types'
 import {
@@ -9,6 +8,7 @@ import {
   normalizeRuntimePathForComparison
 } from '../../shared/cross-platform-path'
 import { isWslPath } from '../wsl'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { createWslWatcher } from './filesystem-watcher-wsl'
 import type { WatchedRoot } from './filesystem-watcher-wsl'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
@@ -261,7 +261,7 @@ function coalesceEvents(
 
 async function tryStatIsDirectory(filePath: string): Promise<boolean | undefined> {
   try {
-    const s = await stat(filePath)
+    const s = await workspaceFsPromises.stat(filePath)
     return s.isDirectory()
   } catch {
     // Why: stat failure (EPERM, vanished file) → undefined; renderer treats it as a file event, the safe default (§4.4).
@@ -653,7 +653,7 @@ async function doInstallLocalWatcher(
 ): Promise<LocalWatcherInstallResult> {
   let root: WatchedRoot
   try {
-    const s = await stat(rootPath)
+    const s = await workspaceFsPromises.stat(rootPath)
     if (!s.isDirectory()) {
       console.warn(`[filesystem-watcher] not a directory: ${rootKey}`)
       rememberUnwatchableRoot(rootKey)

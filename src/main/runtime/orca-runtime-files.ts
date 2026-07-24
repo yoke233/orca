@@ -1,25 +1,11 @@
 /* eslint-disable max-lines -- Why: filesystem, editor-file, and search commands share the same local/SSH path authorization rules. Keeping that IO adapter together prevents separate command paths from drifting on safety checks. */
 import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { watch as watchFs } from 'node:fs'
+import { constants } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
-import {
-  chmod,
-  constants,
-  copyFile,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rename,
-  realpath,
-  rm,
-  stat,
-  writeFile
-} from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, extname, join } from 'node:path'
+import { workspaceFs, workspaceFsPromises } from '../workspace-filesystem'
 import type {
   DirEntry,
   FsChangeEvent,
@@ -29,6 +15,7 @@ import type {
   SearchResult,
   Worktree
 } from '../../shared/types'
+
 import {
   isPathInsideOrEqual,
   isRuntimePathAbsolute,
@@ -543,7 +530,7 @@ export class RuntimeFileCommands {
     try {
       await (connectionId
         ? this.statRemoteTerminalPath(filePath, connectionId)
-        : stat(await resolveAuthorizedPath(filePath, this.host.requireStore())))
+        : workspaceFsPromises.stat(await resolveAuthorizedPath(filePath, this.host.requireStore())))
     } catch (error) {
       if (
         isENOENT(error) ||
@@ -653,7 +640,7 @@ export class RuntimeFileCommands {
       if (relativePath !== null && relativePath !== '' && isSafeMobileRelativePath(relativePath)) {
         const stats = connectionId
           ? await this.statRemoteTerminalPath(absolutePath, connectionId)
-          : await stat(await resolveAuthorizedPath(absolutePath, store))
+          : await workspaceFsPromises.stat(await resolveAuthorizedPath(absolutePath, store))
         return {
           worktree: worktree.id,
           relativePath,
@@ -803,7 +790,7 @@ export class RuntimeFileCommands {
     absolutePath: string
   ): Promise<RuntimeFileStatLike & { isDirectory: () => boolean }> {
     await assertLocalTerminalArtifactPathStillCanonical(absolutePath)
-    const handle = await open(absolutePath, 'r')
+    const handle = await workspaceFsPromises.open(absolutePath, 'r')
     try {
       return handle.stat()
     } finally {
@@ -1042,9 +1029,9 @@ export class RuntimeFileCommands {
       `.${basename(grant.absolutePath)}.${randomUUID()}.tmp`
     )
     try {
-      await writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' })
+      await workspaceFsPromises.writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' })
       if (typeof originalMode === 'number') {
-        await chmod(tempPath, originalMode & 0o7777)
+        await workspaceFsPromises.chmod(tempPath, originalMode & 0o7777)
       }
       const freshHandle = await openLocalTerminalArtifactGrant(grant, constants.O_RDONLY)
       try {
@@ -1052,14 +1039,14 @@ export class RuntimeFileCommands {
       } finally {
         await freshHandle.close()
       }
-      await rename(tempPath, grant.absolutePath)
+      await workspaceFsPromises.rename(tempPath, grant.absolutePath)
       grant.statIdentity = terminalFileStatIdentity(
         await this.statLocalTerminalPath(grant.absolutePath)
       )
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
     } finally {
-      await rm(tempPath, { force: true }).catch(() => {})
+      await workspaceFsPromises.rm(tempPath, { force: true }).catch(() => {})
     }
   }
 
@@ -1166,7 +1153,7 @@ export class RuntimeFileCommands {
     }
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const entries = await readdir(dirPath, { withFileTypes: true })
+    const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     const mapped = await Promise.all(
       entries.map(async (entry) => {
         const entryPath = join(dirPath, entry.name)
@@ -1209,7 +1196,7 @@ export class RuntimeFileCommands {
         }
 
         const rootPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-        const rootStats = await stat(rootPath)
+        const rootStats = await workspaceFsPromises.stat(rootPath)
         if (!rootStats.isDirectory()) {
           throw new Error('not_a_directory')
         }
@@ -1293,13 +1280,13 @@ export class RuntimeFileCommands {
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const fileStats = await stat(filePath)
+    const fileStats = await workspaceFsPromises.stat(filePath)
     const mimeType = RUNTIME_PREVIEWABLE_BINARY_MIME_TYPES[extname(filePath).toLowerCase()]
     if (mimeType) {
       if (fileStats.size > RUNTIME_PREVIEWABLE_BINARY_MAX_BYTES) {
         throw new Error('file_too_large')
       }
-      const buffer = await readFile(filePath)
+      const buffer = await workspaceFsPromises.readFile(filePath)
       return {
         content: buffer.toString('base64'),
         isBinary: true,
@@ -1311,7 +1298,7 @@ export class RuntimeFileCommands {
     if (fileStats.size > MOBILE_FILE_READ_MAX_BYTES) {
       throw new Error('file_too_large')
     }
-    const buffer = await readFile(filePath)
+    const buffer = await workspaceFsPromises.readFile(filePath)
     if (isBinaryBuffer(buffer)) {
       return { content: '', isBinary: true }
     }
@@ -1338,11 +1325,11 @@ export class RuntimeFileCommands {
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const fileStats = await stat(filePath)
+    const fileStats = await workspaceFsPromises.stat(filePath)
     if (fileStats.isDirectory()) {
       throw new Error('Cannot download a directory')
     }
-    const handle = await open(filePath, 'r')
+    const handle = await workspaceFsPromises.open(filePath, 'r')
     try {
       const buffer = Buffer.alloc(Math.min(length, Math.max(0, fileStats.size - offset)))
       const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, offset)
@@ -1383,7 +1370,7 @@ export class RuntimeFileCommands {
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     try {
-      const fileStats = await lstat(filePath)
+      const fileStats = await workspaceFsPromises.lstat(filePath)
       if (fileStats.isDirectory()) {
         throw new Error('Cannot write to a directory')
       }
@@ -1392,7 +1379,7 @@ export class RuntimeFileCommands {
         throw error
       }
     }
-    await writeFile(filePath, content, 'utf-8')
+    await workspaceFsPromises.writeFile(filePath, content, 'utf-8')
     return { ok: true }
   }
 
@@ -1422,8 +1409,8 @@ export class RuntimeFileCommands {
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, content, { flag: 'wx' })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.writeFile(filePath, content, { flag: 'wx' })
     return { ok: true }
   }
 
@@ -1454,8 +1441,8 @@ export class RuntimeFileCommands {
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
     return { ok: true }
   }
 
@@ -1483,9 +1470,9 @@ export class RuntimeFileCommands {
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
     try {
-      await writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
+      await workspaceFsPromises.writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
     } catch (error) {
       rethrowRuntimeFileCreateError(error, filePath)
     }
@@ -1517,7 +1504,7 @@ export class RuntimeFileCommands {
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     await assertRuntimePathDoesNotExist(dirPath)
-    await mkdir(dirPath, { recursive: false })
+    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
     return { ok: true }
   }
 
@@ -1545,7 +1532,7 @@ export class RuntimeFileCommands {
     }
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirPath, { recursive: false })
+    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
     return { ok: true }
   }
 
@@ -1582,9 +1569,9 @@ export class RuntimeFileCommands {
     const store = this.host.requireStore()
     const tempPath = await resolveAuthorizedPath(tempTarget.path, store)
     const finalPath = await resolveAuthorizedPath(finalTarget.path, store)
-    await mkdir(dirname(finalPath), { recursive: true })
-    await copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
-    await rm(tempPath, { force: true })
+    await workspaceFsPromises.mkdir(dirname(finalPath), { recursive: true })
+    await workspaceFsPromises.copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
+    await workspaceFsPromises.rm(tempPath, { force: true })
     return { ok: true }
   }
 
@@ -1621,7 +1608,7 @@ export class RuntimeFileCommands {
     const oldPath = await resolveAuthorizedPath(oldTarget.path, store, { preserveSymlink: true })
     const newPath = await resolveAuthorizedPath(newTarget.path, store, { preserveSymlink: true })
     await assertNoClobberRenameDestinationAvailable(oldPath, newPath)
-    await rename(oldPath, newPath)
+    await workspaceFsPromises.rename(oldPath, newPath)
     return { ok: true }
   }
 
@@ -1661,9 +1648,9 @@ export class RuntimeFileCommands {
     const destinationPath = await resolveAuthorizedPath(destinationTarget.path, store, {
       preserveSymlink: true
     })
-    await mkdir(dirname(destinationPath), { recursive: true })
+    await workspaceFsPromises.mkdir(dirname(destinationPath), { recursive: true })
     // Why: COPYFILE_EXCL preserves the no-clobber invariant of the local shell copy IPC (caller already deconflicts names).
-    await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+    await workspaceFsPromises.copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
     return { ok: true }
   }
 
@@ -1695,7 +1682,7 @@ export class RuntimeFileCommands {
       preserveSymlink: true
     })
     // Why: a non-local runtime has no client Trash; this delete is permanent, so the renderer confirms before calling.
-    await rm(targetPath, { recursive: recursive === true, force: true })
+    await workspaceFsPromises.rm(targetPath, { recursive: recursive === true, force: true })
     return { ok: true }
   }
 
@@ -1762,7 +1749,7 @@ export class RuntimeFileCommands {
       }
     }
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const stats = await stat(filePath)
+    const stats = await workspaceFsPromises.stat(filePath)
     return { size: stats.size, isDirectory: stats.isDirectory(), mtime: stats.mtimeMs }
   }
 
@@ -1960,7 +1947,7 @@ function watchWindowsRuntimeFileExplorer(
   }
 
   // Why: Parcel's Watchman probe can crash the headless server on Windows; use a conservative overflow refresh instead.
-  const watcher = watchFs(rootPath, { recursive: true }, scheduleOverflow)
+  const watcher = workspaceFs.watch(rootPath, { recursive: true }, scheduleOverflow)
   const onClose = (): void => {
     watcher.removeListener('error', onError)
     physicalClose.markExited()
@@ -2071,7 +2058,7 @@ function isBinaryBuffer(buffer: Buffer): boolean {
 
 async function assertRuntimePathDoesNotExist(targetPath: string): Promise<void> {
   try {
-    await lstat(targetPath)
+    await workspaceFsPromises.lstat(targetPath)
     throw new Error(
       `A file or folder named '${basename(targetPath)}' already exists in this location`
     )
@@ -2098,10 +2085,10 @@ function rethrowRuntimeFileCreateError(error: unknown, targetPath: string): neve
 
 async function readLocalMobileFile(filePath: string, store: Store): Promise<string> {
   const authorizedPath = await resolveAuthorizedPath(filePath, store)
-  const fileStat = await stat(authorizedPath)
+  const fileStat = await workspaceFsPromises.stat(authorizedPath)
   // Why: cap the read so opening a large file can't block the WebSocket (previews are read-only convenience views).
   const readLimit = Math.min(fileStat.size, MOBILE_FILE_READ_MAX_BYTES + 1)
-  const handle = await open(authorizedPath, 'r')
+  const handle = await workspaceFsPromises.open(authorizedPath, 'r')
   try {
     const buffer = Buffer.alloc(readLimit)
     const { bytesRead } = await handle.read(buffer, 0, readLimit, 0)
@@ -2173,7 +2160,7 @@ async function openLocalTerminalArtifactGrant(
 ): Promise<FileHandle> {
   await assertLocalTerminalArtifactPathStillCanonical(grant.absolutePath)
   try {
-    return await open(grant.absolutePath, flags | OPEN_NOFOLLOW)
+    return await workspaceFsPromises.open(grant.absolutePath, flags | OPEN_NOFOLLOW)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
       throw new Error('terminal_file_grant_stale')
@@ -2275,7 +2262,7 @@ async function localTerminalArtifactRoots(worktreePath: string): Promise<string[
 
 async function canonicalPathForArtifactComparison(path: string): Promise<string> {
   try {
-    return await realpath(path)
+    return await workspaceFsPromises.realpath(path)
   } catch {
     return path
   }

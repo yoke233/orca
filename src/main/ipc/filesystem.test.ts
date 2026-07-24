@@ -1045,6 +1045,37 @@ describe('registerFilesystemHandlers', () => {
     expect(statMock).toHaveBeenCalledWith(targetPath)
   })
 
+  it('keeps explicit workspace ASAR metadata, read, and readDir on file semantics', async () => {
+    const archivePath = path.join(REPO_PATH, '任意 名字.asar')
+    const archiveBytes = Buffer.from([0x00, 0x01, 0x02])
+    statMock.mockResolvedValue({
+      size: archiveBytes.byteLength,
+      isDirectory: () => false,
+      mtimeMs: 123
+    })
+    readFileMock.mockResolvedValue(archiveBytes)
+    readdirMock.mockRejectedValue(Object.assign(new Error('not a directory'), { code: 'ENOTDIR' }))
+    registerFilesystemHandlers(store as never)
+
+    await expect(handlers.get('fs:stat')!(null, { filePath: archivePath })).resolves.toEqual({
+      size: archiveBytes.byteLength,
+      isDirectory: false,
+      mtime: 123
+    })
+    await expect(handlers.get('fs:pathExists')!(null, { filePath: archivePath })).resolves.toBe(
+      true
+    )
+    await expect(handlers.get('fs:readFile')!(null, { filePath: archivePath })).resolves.toEqual({
+      content: '',
+      isBinary: true
+    })
+    await expect(handlers.get('fs:readDir')!(null, { dirPath: archivePath })).rejects.toMatchObject(
+      {
+        code: 'ENOTDIR'
+      }
+    )
+  })
+
   it('returns false from pathExists when an SSH provider reports a missing path', async () => {
     const provider = {
       stat: vi.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))

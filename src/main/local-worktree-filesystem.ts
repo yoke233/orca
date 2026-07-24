@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import type { RmOptions } from 'node:fs'
-import { lstat, readFile, rm } from 'node:fs/promises'
 import { win32 } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
@@ -10,6 +9,7 @@ import {
 } from '../shared/wsl-login-shell-command'
 import { toLinuxPath } from './wsl'
 import type { ReadPath, StatPath } from './worktree-orphan-gitdir-proof'
+import { workspaceFsPromises } from './workspace-filesystem'
 
 export type LocalWorktreeFilesystemOptions = {
   wslDistro?: string
@@ -96,8 +96,8 @@ export function getLocalWorktreePathAccess(
   const distro = options.wslDistro?.trim()
   if (!shouldUseWslFilesystem(options) || !distro) {
     return {
-      statPath: lstat,
-      readPath: (path) => readFile(path, 'utf8')
+      statPath: workspaceFsPromises.lstat,
+      readPath: (path) => workspaceFsPromises.readFile(path, 'utf8')
     }
   }
 
@@ -149,7 +149,7 @@ async function removeHostWorktreePath(targetPath: string): Promise<void> {
 
   while (true) {
     try {
-      await rm(removalPath, rmOptions)
+      await workspaceFsPromises.rm(removalPath, rmOptions)
       return
     } catch (error) {
       if (attempt >= retryDelays.length || !isTransientWindowsRemovalError(error)) {

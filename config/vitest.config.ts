@@ -10,7 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@renderer': resolve('src/renderer/src'),
-      '@': resolve('src/renderer/src')
+      '@': resolve('src/renderer/src'),
+      // Plain Node has non-ASAR semantics but does not expose Electron's builtin name.
+      'original-fs': resolve('config/vitest-original-filesystem.ts')
     }
   },
   test: {

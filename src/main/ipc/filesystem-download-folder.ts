@@ -1,12 +1,12 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { getRuntimePathBasename } from '../../shared/cross-platform-path'
 import { sanitizeLocalDownloadFilename } from '../local-download-filename'
 import { promoteLocalDownloadedFolder } from '../local-downloaded-folder-promotion'
 import { requireSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import { isENOENT } from './filesystem-auth'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 type DownloadFolderResult = { canceled: true } | { canceled: false; destinationPath: string }
 
@@ -25,7 +25,7 @@ function createSiblingTransferPath(destinationPath: string, suffix: string): str
 
 async function assertDownloadFolderDestinationAvailable(destinationPath: string): Promise<void> {
   try {
-    await stat(destinationPath)
+    await workspaceFsPromises.stat(destinationPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -37,7 +37,7 @@ async function assertDownloadFolderDestinationAvailable(destinationPath: string)
 
 async function cleanupLocalTransferDirectory(dirPath: string): Promise<void> {
   try {
-    await rm(dirPath, { recursive: true, force: true })
+    await workspaceFsPromises.rm(dirPath, { recursive: true, force: true })
   } catch (error) {
     // Why: cleanup must not mask the transfer error, but a leaked recursive
     // download tree needs enough visibility to diagnose and remove it.

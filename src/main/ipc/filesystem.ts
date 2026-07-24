@@ -1,12 +1,12 @@
 /* eslint-disable max-lines */
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { readdir, readFile, writeFile, stat, lstat, open, rename, rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, extname, join, resolve } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { gitExecFileAsync, wslAwareSpawn } from '../git/runner'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { tryDeleteWslUncPath } from '../wsl-unc-delete'
 import type { Store } from '../persistence'
 import type {
@@ -28,6 +28,7 @@ import type {
   Repo,
   TuiAgent
 } from '../../shared/types'
+
 import type { GitHistoryOptions, GitHistoryResult } from '../../shared/git-history'
 import type { SshMutationExpectation } from '../../shared/ssh-types'
 import { assertSshMutationExpectation } from '../ssh/ssh-connection-generation'
@@ -150,7 +151,7 @@ async function readLocalLogSnapshot(filePath: string): Promise<{
   isBinary: boolean
   fileIdentity?: string
 }> {
-  const handle = await open(filePath, 'r')
+  const handle = await workspaceFsPromises.open(filePath, 'r')
   try {
     const stats = await handle.stat()
     if (stats.size > MAX_TEXT_FILE_SIZE) {
@@ -213,12 +214,12 @@ async function cleanupLocalTransferPath(filePath: string | null): Promise<void> 
   if (!filePath) {
     return
   }
-  await rm(filePath, { force: true }).catch(() => {})
+  await workspaceFsPromises.rm(filePath, { force: true }).catch(() => {})
 }
 
 async function inspectDownloadDestination(destinationPath: string): Promise<{ existed: boolean }> {
   try {
-    const destinationStat = await stat(destinationPath)
+    const destinationStat = await workspaceFsPromises.stat(destinationPath)
     if (destinationStat.isDirectory()) {
       throw new Error('Cannot download to a directory')
     }
@@ -233,7 +234,7 @@ async function inspectDownloadDestination(destinationPath: string): Promise<{ ex
 
 async function assertDestinationStillUnclaimed(destinationPath: string): Promise<void> {
   try {
-    await stat(destinationPath)
+    await workspaceFsPromises.stat(destinationPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -250,20 +251,20 @@ async function promoteDownloadedFile(
 ): Promise<void> {
   if (!destinationExisted) {
     await assertDestinationStillUnclaimed(destinationPath)
-    await rename(tempPath, destinationPath)
+    await workspaceFsPromises.rename(tempPath, destinationPath)
     return
   }
 
   const backupPath = createSiblingTransferPath(destinationPath, 'backup')
   let backupCreated = false
   try {
-    await rename(destinationPath, backupPath)
+    await workspaceFsPromises.rename(destinationPath, backupPath)
     backupCreated = true
-    await rename(tempPath, destinationPath)
+    await workspaceFsPromises.rename(tempPath, destinationPath)
     await cleanupLocalTransferPath(backupPath)
   } catch (error) {
     if (backupCreated) {
-      await rename(backupPath, destinationPath).catch(() => {})
+      await workspaceFsPromises.rename(backupPath, destinationPath).catch(() => {})
     }
     throw error
   }
@@ -436,7 +437,7 @@ function isBinaryBuffer(buffer: Buffer): boolean {
 }
 
 async function isBinaryFilePrefix(filePath: string): Promise<boolean> {
-  const handle = await open(filePath, 'r')
+  const handle = await workspaceFsPromises.open(filePath, 'r')
   try {
     const probe = Buffer.alloc(BINARY_PROBE_BYTES)
     const { bytesRead } = await handle.read(probe, 0, probe.length, 0)
@@ -510,7 +511,7 @@ export function registerFilesystemHandlers(
         throwSite = 'authorize'
         const dirPath = await resolveAuthorizedPath(args.dirPath, store)
         throwSite = 'readdir'
-        const entries = await readdir(dirPath, { withFileTypes: true })
+        const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
         const mapped = await Promise.all(
           entries.map(async (entry) => ({
             name: entry.name,
@@ -561,7 +562,7 @@ export function registerFilesystemHandlers(
       if (args.includeLocalLogMetadata === true) {
         return readLocalLogSnapshot(filePath)
       }
-      const stats = await stat(filePath)
+      const stats = await workspaceFsPromises.stat(filePath)
       const mimeType = PREVIEWABLE_BINARY_MIME_TYPES[extname(filePath).toLowerCase()]
       const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
       if (stats.size > sizeLimit) {
@@ -571,7 +572,7 @@ export function registerFilesystemHandlers(
       }
 
       if (mimeType) {
-        const buffer = await readFile(filePath)
+        const buffer = await workspaceFsPromises.readFile(filePath)
         return {
           content: buffer.toString('base64'),
           isBinary: true,
@@ -586,7 +587,7 @@ export function registerFilesystemHandlers(
         return { content: '', isBinary: true }
       }
 
-      const buffer = await readFile(filePath)
+      const buffer = await workspaceFsPromises.readFile(filePath)
       if (isBinaryBuffer(buffer)) {
         return { content: '', isBinary: true }
       }
@@ -668,7 +669,10 @@ export function registerFilesystemHandlers(
       const tempPath = createSiblingTransferPath(destinationPath, 'download')
       let promoted = false
       try {
-        await writeFile(tempPath, decodeDownloadedFileContent(content, encoding))
+        await workspaceFsPromises.writeFile(
+          tempPath,
+          decodeDownloadedFileContent(content, encoding)
+        )
         await promoteDownloadedFile(tempPath, destinationPath, existed)
         promoted = true
         return { canceled: false, destinationPath }
@@ -709,7 +713,7 @@ export function registerFilesystemHandlers(
       const tempPath = createSiblingTransferPath(destinationPath, 'download')
       const transferId = randomUUID()
       try {
-        const handle = await open(tempPath, 'wx')
+        const handle = await workspaceFsPromises.open(tempPath, 'wx')
         const senderId = typeof event.sender.id === 'number' ? event.sender.id : Number.NaN
         const cleanupTimer = setTimeout(() => {
           void closeDownloadSession(transferId, true)
@@ -824,7 +828,7 @@ export function registerFilesystemHandlers(
       const filePath = await resolveAuthorizedPath(args.filePath, store)
 
       try {
-        const fileStats = await lstat(filePath)
+        const fileStats = await workspaceFsPromises.lstat(filePath)
         if (fileStats.isDirectory()) {
           throw new Error('Cannot write to a directory')
         }
@@ -834,7 +838,7 @@ export function registerFilesystemHandlers(
         }
       }
 
-      await writeFile(filePath, args.content, 'utf-8')
+      await workspaceFsPromises.writeFile(filePath, args.content, 'utf-8')
     }
   )
 
@@ -898,7 +902,7 @@ export function registerFilesystemHandlers(
         return { size: s.size, isDirectory: s.type === 'directory', mtime: s.mtime }
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
-      const stats = await stat(filePath)
+      const stats = await workspaceFsPromises.stat(filePath)
       return {
         size: stats.size,
         isDirectory: stats.isDirectory(),
@@ -917,7 +921,7 @@ export function registerFilesystemHandlers(
           return true
         }
         const filePath = await resolveAuthorizedPath(args.filePath, store)
-        await stat(filePath)
+        await workspaceFsPromises.stat(filePath)
         return true
       } catch (error) {
         if (isENOENT(error)) {

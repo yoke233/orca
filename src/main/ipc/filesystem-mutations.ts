@@ -2,18 +2,6 @@
 authorization, SSH routing, and external import behavior remain audited together. */
 import { ipcMain } from 'electron'
 import { constants } from 'node:fs'
-import {
-  copyFile,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  unlink,
-  writeFile
-} from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Store } from '../persistence'
@@ -24,6 +12,7 @@ import { importExternalPathsSsh } from './filesystem-import-ssh'
 import { assertNoClobberRenameDestinationAvailable } from '../../shared/filesystem-rename-collision'
 import type { SshMutationExpectation } from '../../shared/ssh-types'
 import { assertSshMutationExpectation } from '../ssh/ssh-connection-generation'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 /**
  * Re-throw filesystem errors with user-friendly messages.
@@ -54,7 +43,7 @@ function rethrowWithUserMessage(error: unknown, targetPath: string): never {
  */
 async function assertNotExists(targetPath: string): Promise<void> {
   try {
-    await lstat(targetPath)
+    await workspaceFsPromises.lstat(targetPath)
     throw new Error(
       `A file or folder named '${basename(targetPath)}' already exists in this location`
     )
@@ -87,10 +76,10 @@ export function registerFilesystemMutationHandlers(store: Store): void {
         return provider.createFile(args.filePath)
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
-      await mkdir(dirname(filePath), { recursive: true })
+      await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
       try {
         // Use the 'wx' flag for atomic create-if-not-exists, avoiding TOCTOU races
-        await writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
+        await workspaceFsPromises.writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
       } catch (error) {
         rethrowWithUserMessage(error, filePath)
       }
@@ -115,7 +104,7 @@ export function registerFilesystemMutationHandlers(store: Store): void {
       }
       const dirPath = await resolveAuthorizedPath(args.dirPath, store)
       await assertNotExists(dirPath)
-      await mkdir(dirPath, { recursive: true })
+      await workspaceFsPromises.mkdir(dirPath, { recursive: true })
     }
   )
 
@@ -147,7 +136,7 @@ export function registerFilesystemMutationHandlers(store: Store): void {
       const oldPath = await resolveAuthorizedPath(args.oldPath, store, { preserveSymlink: true })
       const newPath = await resolveAuthorizedPath(args.newPath, store, { preserveSymlink: true })
       await assertNoClobberRenameDestinationAvailable(oldPath, newPath)
-      await rename(oldPath, newPath)
+      await workspaceFsPromises.rename(oldPath, newPath)
     }
   )
 
@@ -177,10 +166,10 @@ export function registerFilesystemMutationHandlers(store: Store): void {
       const destinationPath = await resolveAuthorizedPath(args.destinationPath, store, {
         preserveSymlink: true
       })
-      await mkdir(dirname(destinationPath), { recursive: true })
+      await workspaceFsPromises.mkdir(dirname(destinationPath), { recursive: true })
       // Why: duplicate/copy callers deconflict before copying. COPYFILE_EXCL
       // keeps a late race from silently overwriting an existing file.
-      await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+      await workspaceFsPromises.copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
     }
   )
 
@@ -387,9 +376,9 @@ async function importOneSource(
   // Why: validate source using lstat on the unresolved path *before*
   // canonicalization so top-level symlinks are rejected instead of being
   // silently dereferenced by realpath.
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }
@@ -443,7 +432,7 @@ async function importOneSource(
       : copyLocalFileNoFollow(resolvedSource, destPath))
   } catch (error) {
     if (isDir) {
-      await rm(destPath, { recursive: true, force: true }).catch(() => {})
+      await workspaceFsPromises.rm(destPath, { recursive: true, force: true }).catch(() => {})
     }
     return {
       sourcePath,
@@ -470,9 +459,9 @@ async function stageOneSourceForRuntimeUpload(
   // authorize before lstat/readFile just like local copy imports.
   authorizeExternalPath(resolvedSource)
 
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }
@@ -524,10 +513,10 @@ async function stageOneSourceForRuntimeUpload(
 async function stageDirectoryEntries(rootPath: string): Promise<StagedExternalImportEntry[]> {
   const entries: StagedExternalImportEntry[] = [{ relativePath: '', kind: 'directory' }]
   let totalBytes = 0
-  const rootRealPath = await realpath(rootPath)
+  const rootRealPath = await workspaceFsPromises.realpath(rootPath)
 
   async function visit(dirPath: string): Promise<void> {
-    const dirStat = await lstat(dirPath)
+    const dirStat = await workspaceFsPromises.lstat(dirPath)
     if (dirStat.isSymbolicLink()) {
       throw new RuntimeUploadSymlinkError(
         `Symlink not allowed in '${normalizeRelativeUploadPath(relative(rootPath, dirPath))}'`
@@ -543,7 +532,7 @@ async function stageDirectoryEntries(rootPath: string): Promise<StagedExternalIm
       dirPath,
       normalizeRelativeUploadPath(relative(rootPath, dirPath))
     )
-    const dirEntries = await readdir(dirPath, { withFileTypes: true })
+    const dirEntries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     for (const entry of dirEntries) {
       const childPath = join(dirPath, entry.name)
       const childRelativePath = normalizeRelativeUploadPath(relative(rootPath, childPath))
@@ -576,7 +565,7 @@ async function stageFileEntry(
   relativePath: string,
   options?: { rootRealPath?: string; totalBytesBefore?: number }
 ): Promise<{ entry: StagedExternalImportEntry; byteLength: number }> {
-  const statResult = await lstat(filePath)
+  const statResult = await workspaceFsPromises.lstat(filePath)
   const displayPath = normalizeRelativeUploadPath(relativePath)
   if (statResult.isSymbolicLink()) {
     throw new RuntimeUploadSymlinkError(`Symlink not allowed in '${displayPath}'`)
@@ -592,7 +581,10 @@ async function stageFileEntry(
       ? statResult.size
       : options.totalBytesBefore + statResult.size
   assertRemoteUploadBudget(relativePath, statResult.size, initialTotalBytes)
-  const fileHandle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const fileHandle = await workspaceFsPromises.open(
+    filePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+  )
   try {
     const openedStat = await fileHandle.stat()
     if (!openedStat.isFile()) {
@@ -633,7 +625,7 @@ async function assertRealPathInsideRoot(
   candidatePath: string,
   displayPath: string
 ): Promise<void> {
-  const candidateRealPath = await realpath(candidatePath)
+  const candidateRealPath = await workspaceFsPromises.realpath(candidatePath)
   const relativeToRoot = relative(rootRealPath, candidateRealPath)
   // Why: `..name` is a valid child path; only `..` and `../...` escape.
   if (
@@ -666,7 +658,7 @@ function normalizeRelativeUploadPath(path: string): string {
  * is found anywhere in the subtree.
  */
 async function preScanForSymlinks(dirPath: string): Promise<boolean> {
-  const entries = await readdir(dirPath, { withFileTypes: true })
+  const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
   for (const entry of entries) {
     if (entry.isSymbolicLink()) {
       return true
@@ -687,12 +679,12 @@ async function preScanForSymlinks(dirPath: string): Promise<boolean> {
  * buffering entire files into memory.
  */
 async function recursiveCopyDir(srcDir: string, destDir: string): Promise<void> {
-  await mkdir(destDir, { recursive: false })
-  const entries = await readdir(srcDir, { withFileTypes: true })
+  await workspaceFsPromises.mkdir(destDir, { recursive: false })
+  const entries = await workspaceFsPromises.readdir(srcDir, { withFileTypes: true })
   for (const entry of entries) {
     const srcPath = join(srcDir, entry.name)
     const dstPath = join(destDir, entry.name)
-    const statResult = await lstat(srcPath)
+    const statResult = await workspaceFsPromises.lstat(srcPath)
     if (statResult.isSymbolicLink()) {
       throw new Error(`Symlink not allowed in '${entry.name}'`)
     }
@@ -710,9 +702,9 @@ async function recursiveCopyDir(srcDir: string, destDir: string): Promise<void> 
 async function copyLocalFileNoFollow(
   srcPath: string,
   dstPath: string,
-  statResult?: Awaited<ReturnType<typeof lstat>>
+  statResult?: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
 ): Promise<void> {
-  const beforeOpenStat = statResult ?? (await lstat(srcPath))
+  const beforeOpenStat = statResult ?? (await workspaceFsPromises.lstat(srcPath))
   if (beforeOpenStat.isSymbolicLink()) {
     throw new Error(`Symlink not allowed in '${basename(srcPath)}'`)
   }
@@ -721,8 +713,11 @@ async function copyLocalFileNoFollow(
   }
 
   let destinationCreated = false
-  const sourceHandle = await open(srcPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
-  let destinationHandle: Awaited<ReturnType<typeof open>> | null = null
+  const sourceHandle = await workspaceFsPromises.open(
+    srcPath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+  )
+  let destinationHandle: Awaited<ReturnType<typeof workspaceFsPromises.open>> | null = null
   try {
     const openedStat = await sourceHandle.stat()
     if (
@@ -742,12 +737,12 @@ async function copyLocalFileNoFollow(
     // Why: copyFile(path, path) would follow a source symlink if the source is
     // swapped after validation. Streaming from an O_NOFOLLOW handle keeps the
     // authorized file identity pinned for the copy.
-    destinationHandle = await open(dstPath, 'wx')
+    destinationHandle = await workspaceFsPromises.open(dstPath, 'wx')
     destinationCreated = true
     await pipeline(sourceHandle.createReadStream(), destinationHandle.createWriteStream())
   } catch (error) {
     if (destinationCreated) {
-      await unlink(dstPath).catch(() => {})
+      await workspaceFsPromises.unlink(dstPath).catch(() => {})
     }
     throw error
   } finally {
@@ -800,7 +795,7 @@ async function deconflictName(
 
 async function nameExists(dir: string, name: string): Promise<boolean> {
   try {
-    await lstat(join(dir, name))
+    await workspaceFsPromises.lstat(join(dir, name))
     return true
   } catch (error) {
     if (isENOENT(error)) {
