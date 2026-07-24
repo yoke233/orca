@@ -231,6 +231,23 @@ describe('PtyStartupIngress', () => {
     }
   })
 
+  it('answers both Codex color slots after startup query authority close is requested', () => {
+    const queries = '\x1b]10;?\x1b\\\x1b]11;?\x1b\\'
+    for (let split = 0; split <= queries.length; split += 1) {
+      const { ingress, writes, emissions } = createHarness()
+      ingress.closeQueryAuthority()
+
+      ingress.accept(queries.slice(0, split))
+      ingress.accept(queries.slice(split))
+
+      expect(writes, `split ${split}`).toEqual([
+        '\x1b]10;rgb:2e2e/3434/3434\x1b\\',
+        '\x1b]11;rgb:ffff/ffff/ffff\x1b\\'
+      ])
+      expect(visible(emissions), `split ${split}`).toBe('')
+    }
+  })
+
   it('consumes a native ConPTY color query before any downstream responder at every split', () => {
     const query = '\x1b]11;?\x1b\\'
     for (let split = 0; split <= query.length; split += 1) {
