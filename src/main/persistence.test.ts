@@ -335,6 +335,75 @@ describe('Store', () => {
     expect(store.getRepos()).toEqual([])
   }, 15_000)
 
+  it('clone-reads and synchronously persists the main-owned Codex reset ledger', async () => {
+    const store = await createStore()
+    const ledger = {
+      version: 1 as const,
+      attempts: [
+        {
+          idempotencyKey: '11111111-1111-4111-8111-111111111111',
+          expectedScope: {
+            target: { runtime: 'host' as const, wslDistro: null },
+            accountId: 'account-host',
+            accountRevision: 42,
+            offerRevision: 'v1:offer'
+          },
+          state: 'providerPending' as const
+        }
+      ]
+    }
+
+    store.replaceCodexResetCreditAttemptLedgerAndFlush(ledger)
+    const firstRead = store.getCodexResetCreditAttemptLedger()
+    firstRead.attempts.splice(0, 1)
+
+    expect(store.getCodexResetCreditAttemptLedger()).toEqual(ledger)
+    expect((readDataFile() as PersistedState).codexResetCreditAttemptLedger).toEqual(ledger)
+  })
+
+  it('rolls the in-memory Codex reset ledger back when its sync flush fails', async () => {
+    const store = await createStore()
+    const before = store.getCodexResetCreditAttemptLedger()
+    vi.spyOn(store, 'flushOrThrow').mockImplementationOnce(() => {
+      throw new Error('disk full')
+    })
+
+    expect(() =>
+      store.replaceCodexResetCreditAttemptLedgerAndFlush({
+        version: 1,
+        attempts: [
+          {
+            idempotencyKey: '11111111-1111-4111-8111-111111111111',
+            expectedScope: {
+              target: { runtime: 'host', wslDistro: null },
+              accountId: 'account-host',
+              accountRevision: 42,
+              offerRevision: 'v1:offer'
+            },
+            state: 'providerPending'
+          }
+        ]
+      })
+    ).toThrow('disk full')
+
+    expect(store.getCodexResetCreditAttemptLedger()).toEqual(before)
+  })
+
+  it('preserves a corrupt Codex reset ledger as a fail-closed read error', async () => {
+    writeDataFile({
+      ...getDefaultPersistedState(testState.dir),
+      codexResetCreditAttemptLedger: {
+        version: 1,
+        attempts: [{ state: 'providerPending' }]
+      }
+    })
+
+    const store = await createStore()
+    expect(() => store.getCodexResetCreditAttemptLedger()).toThrow(
+      'Codex reset-credit attempt ledger is corrupt'
+    )
+  })
+
   it('does not restore a terminal tab after its durable close flush returns', async () => {
     const store = await createStore()
     const worktreeId = 'repo-1::/tmp/worktree-1'
@@ -3583,7 +3652,9 @@ describe('Store', () => {
     store.removeProjectForHost('shared', 'ssh:ssh-a')
 
     // The removed SSH host's session is pruned; the surviving local session stays.
-    expect(store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']).toBeUndefined()
+    expect(
+      store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']
+    ).toBeUndefined()
     expect(store.getWorkspaceSession().lastVisitedAtByWorktreeId?.['shared::/repo']).toBe(111)
   })
 
@@ -3615,7 +3686,9 @@ describe('Store', () => {
     store.removeProjectForHost('shared', 'local')
 
     expect(store.getWorkspaceSession().lastVisitedAtByWorktreeId?.['shared::/repo']).toBeUndefined()
-    expect(store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']).toBe(222)
+    expect(
+      store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']
+    ).toBe(222)
   })
 
   it('removeProjectForHost prunes only the removed host when a third host also shares the owner key', async () => {
@@ -3665,9 +3738,13 @@ describe('Store', () => {
     store.removeProjectForHost('shared', 'ssh:ssh-a')
 
     // Only the removed host's partition is pruned; local and the other SSH host survive.
-    expect(store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']).toBeUndefined()
+    expect(
+      store.getWorkspaceSession('ssh:ssh-a').lastVisitedAtByWorktreeId?.['shared::/repo']
+    ).toBeUndefined()
     expect(store.getWorkspaceSession().lastVisitedAtByWorktreeId?.['shared::/repo']).toBe(111)
-    expect(store.getWorkspaceSession('ssh:ssh-b').lastVisitedAtByWorktreeId?.['shared::/repo']).toBe(333)
+    expect(
+      store.getWorkspaceSession('ssh:ssh-b').lastVisitedAtByWorktreeId?.['shared::/repo']
+    ).toBe(333)
   })
 
   it('reorderReposForHost independently reorders local and SSH rows with shared ids', async () => {

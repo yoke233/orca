@@ -511,7 +511,19 @@ import {
 } from '../github/client'
 import type { GitHubPRBranchLookupOptions } from '../github/client'
 import { resolveGitHubPrStartPoint } from '../github/pr-start-point'
-import { fetchPrHeadTrackingRef } from '../github/pr-head-tracking-ref'
+import {
+  fetchGitHubPullRequestHeadRef,
+  fetchPrHeadTrackingRef
+} from '../github/pr-head-tracking-ref'
+import {
+  gitlabMergeRequestHeadLocalRef,
+  reviewHeadRemoteRefComponent
+} from '../../shared/review-head-tracking-ref'
+import { fetchGitLabMergeRequestHeadRef } from '../gitlab/mr-head-tracking-ref'
+import { isTransientReviewHeadFetchError } from '../git/fetch-error-classification'
+import { resolveGitHubReviewHeadRemote } from '../github/review-head-remote'
+import { fetchCompareBaseRefWithLocalFallback } from '../git/compare-base-ref-fetch'
+import { pickPreferredGitRemote } from '../../shared/preferred-git-remote'
 import { getWorkItemDetails, getPRFileContents } from '../github/work-item-details'
 import { getRateLimit } from '../github/rate-limit'
 import {
@@ -776,10 +788,12 @@ import {
 } from '../../shared/constants'
 import { listRepoWorktrees } from '../repo-worktrees'
 import {
+  createWorktreeCopiedPaths,
   createWorktreeLinkedPaths,
   findExistingWorktreeSymlinkPaths,
   removeWorktreeLinkedPaths
 } from '../ipc/worktree-symlinks'
+import { resolveWorktreeIncludePaths } from '../git/worktree-include-file'
 import { deleteWorktreeHistoryDir } from '../terminal-history'
 import {
   cleanupUnusedWorktreePushTargetRemote,
@@ -881,11 +895,16 @@ import { detectRepoIconAndUpstream } from '../repo-icon-autodetect'
 import { enrichMissingRepoGitRemoteIdentities } from '../repo-git-remote-identity-enrichment'
 import { githubAvatarIcon } from '../../shared/repo-icon'
 import type { ClaudeAccountService } from '../claude-accounts/service'
-import type { CodexAccountService } from '../codex-accounts/service'
+import type {
+  CodexAccountService,
+  CodexResetCreditRejectedBeforeProviderReason
+} from '../codex-accounts/service'
+import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import type { RateLimitService } from '../rate-limits/service'
 import type { ClaudeRateLimitAccountsState, CodexRateLimitAccountsState } from '../../shared/types'
 import { applyPRBotAuthorOverride } from '../../shared/pr-bot-author-overrides'
-import type { RateLimitState } from '../../shared/rate-limit-types'
+import type { CodexRateLimitResetOutcome, RateLimitState } from '../../shared/rate-limit-types'
+import type { CodexResetCreditExpectedScope } from '../../shared/codex-reset-credit-scope'
 import type { VoiceSettings } from '../../shared/speech-types'
 import { getSpeechModelManager, getSpeechSttService } from '../speech/speech-runtime-service'
 import { getCatalogModel, isLocalSpeechModel, SPEECH_MODEL_CATALOG } from '../speech/model-catalog'
@@ -926,6 +945,18 @@ export type AccountsSnapshot = {
   codex: CodexRateLimitAccountsState
   rateLimits: RateLimitState
 }
+
+export type CodexRateLimitResetRpcResult = {
+  scope: CodexResetCreditExpectedScope
+  snapshot: AccountsSnapshot
+} & (
+  | { outcome: CodexRateLimitResetOutcome }
+  | {
+      status: 'rejectedBeforeProvider'
+      retryDisposition: 'discardAttempt'
+      reason: CodexResetCreditRejectedBeforeProviderReason
+    }
+)
 
 type RuntimeStore = {
   getRepos: Store['getRepos']
@@ -4107,11 +4138,20 @@ export class OrcaRuntimeService {
     // or a stale browser-persisted session). Hydrating such a key would surface a
     // phantom "unknown"/duplicate workspace with no live repo behind it. Only
     // hydrate sessions whose repo still exists; leave unparseable keys alone.
-    const liveRepoIds = new Set((this.store?.getRepos?.() ?? []).map((repo) => repo.id))
+    // Resolved lazily so unparseable keys (floating terminals) never pay for a
+    // repo inventory on the hot poll path, and `null` when the store cannot
+    // report repos — an unavailable list must not read as "every repo is gone".
+    let liveRepoIds: Set<string> | null | undefined
     for (const [entryWorktreeId, persistedTabs] of entries) {
       const ownerRepoId = splitWorktreeIdForFilesystem(entryWorktreeId)?.repoId
-      if (ownerRepoId && !liveRepoIds.has(ownerRepoId)) {
-        continue
+      if (ownerRepoId) {
+        if (liveRepoIds === undefined) {
+          const knownRepos = this.store?.getRepos?.()
+          liveRepoIds = knownRepos ? new Set(knownRepos.map((repo) => repo.id)) : null
+        }
+        if (liveRepoIds && !liveRepoIds.has(ownerRepoId)) {
+          continue
+        }
       }
       const existing = this.mobileSessionTabsByWorktree.get(entryWorktreeId)
       if (
@@ -10324,6 +10364,42 @@ export class OrcaRuntimeService {
 
   selectCodexAccount(accountId: string | null): Promise<CodexRateLimitAccountsState> {
     return this.requireAccountServices().codexAccounts.selectAccount(accountId)
+  }
+
+  selectCodexAccountForTarget(
+    accountId: string | null,
+    target: CodexAccountSelectionTarget
+  ): Promise<CodexRateLimitAccountsState> {
+    return this.requireAccountServices().codexAccounts.selectAccountForTarget(accountId, target)
+  }
+
+  async consumeCodexRateLimitResetCredit(
+    idempotencyKey: string,
+    expectedScope: CodexResetCreditExpectedScope
+  ): Promise<CodexRateLimitResetRpcResult> {
+    const { claudeAccounts, codexAccounts } = this.requireAccountServices()
+    const result = await codexAccounts.consumeRateLimitResetCredit(idempotencyKey, expectedScope)
+    // Why: Codex selection and usage were captured before its mutation queue
+    // advanced. Re-reading them here could pair scope A with queued selection B.
+    const snapshot = {
+      claude: claudeAccounts.listAccounts(),
+      codex: result.codex,
+      rateLimits: result.rateLimits
+    }
+    if ('status' in result) {
+      return {
+        status: result.status,
+        retryDisposition: result.retryDisposition,
+        reason: result.reason,
+        scope: result.scope,
+        snapshot
+      }
+    }
+    return {
+      outcome: result.outcome,
+      scope: result.scope,
+      snapshot
+    }
   }
 
   removeClaudeAccount(accountId: string): Promise<ClaudeRateLimitAccountsState> {
@@ -18846,8 +18922,19 @@ export class OrcaRuntimeService {
       warnings: lineageWarnings
     } = this.recordCreatedWorktreeLineage(worktree, lineageResolution)
 
-    if (repo.symlinkPaths && repo.symlinkPaths.length > 0) {
-      await createWorktreeLinkedPaths(repo.path, created.path, repo.symlinkPaths)
+    const symlinkPaths = repo.symlinkPaths ?? []
+    if (symlinkPaths.length > 0) {
+      await createWorktreeLinkedPaths(repo.path, created.path, symlinkPaths)
+    }
+
+    // Why: project-level `.worktreeinclude` travels with the repo (issue #7549); copy semantics
+    // (never symlink) so each worktree owns its files. Paths already linked above are skipped.
+    const worktreeIncludePaths = await resolveWorktreeIncludePaths(
+      repo.path,
+      localWorktreeGitOptions
+    )
+    if (worktreeIncludePaths.length > 0) {
+      await createWorktreeCopiedPaths(repo.path, created.path, worktreeIncludePaths)
     }
 
     let setup: CreateWorktreeResult['setup']
@@ -20036,36 +20123,31 @@ export class OrcaRuntimeService {
     const gitExec = sshGitProvider
       ? (gitArgs: string[]) => sshGitProvider.exec(gitArgs, repo.path)
       : (gitArgs: string[]) => gitExecFileAsync(gitArgs, localGitExecOptions ?? { cwd: repo.path })
-    const resolveRemote = sshGitProvider
-      ? async () => {
-          const { stdout } = await sshGitProvider.exec(['remote'], repo.path)
-          const remotes = stdout
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean)
-          if (remotes.includes('origin')) {
-            return 'origin'
-          }
-          if (remotes.length === 1) {
-            return remotes[0]!
-          }
-          if (remotes.length === 0) {
-            throw new Error('Repo has no configured git remotes.')
-          }
-          throw new Error(
-            `Repo has multiple remotes (${remotes.join(', ')}) and no default is configured.`
-          )
-        }
-      : () => getDefaultRemote(repo.path, localWorktreeGitOptions)
+    // Why: one shared resolver for local and SSH so origin-vs-upstream cannot
+    // diverge by surface; it prefers the remote hosting the PR's project.
+    const resolveRemote = (): Promise<string> =>
+      resolveGitHubReviewHeadRemote({
+        repoPath: repo.path,
+        connectionId: repo.connectionId ?? null,
+        localGitOptions: localWorktreeGitOptions,
+        gitExec
+      })
 
-    // Why: SSH repos can't fetch over the relay's read-only git.exec channel, so
-    // route the PR head fetch through the write-capable helper instead of gitExec.
+    // Why: SSH review-head fetches require narrow write-capable RPCs.
     const fetchRemoteTrackingRef = (remote: string, branch: string): Promise<void> =>
       fetchPrHeadTrackingRef(
         repo,
         sshGitProvider,
         remote,
         branch,
+        localGitExecOptions ? { localGitExecOptions } : {}
+      )
+    const fetchPullRequestHeadRef = (remote: string, prNumber: number): Promise<string> =>
+      fetchGitHubPullRequestHeadRef(
+        repo,
+        sshGitProvider,
+        remote,
+        prNumber,
         localGitExecOptions ? { localGitExecOptions } : {}
       )
 
@@ -20079,6 +20161,7 @@ export class OrcaRuntimeService {
       localGitOptions: localWorktreeGitOptions,
       gitExec,
       fetchRemoteTrackingRef,
+      fetchPullRequestHeadRef,
       resolveRemote
     })
   }
@@ -20185,48 +20268,87 @@ export class OrcaRuntimeService {
     // failure must NOT abort the whole resolution — that would discard the
     // already-verified source-branch base and silently fall back to the repo
     // default branch. Degrade gracefully by dropping compareBaseRef instead.
-    const fetchCompareBaseRef = async (): Promise<boolean> => {
-      if (!targetBranch || !compareBaseRef) {
-        return false
-      }
-      try {
-        await fetchRemoteTrackingRef(targetBranch, compareBaseRef)
-        return true
-      } catch (error) {
-        console.warn('[runtime:resolveManagedMrBase] optional compare-base fetch failed', {
-          remote,
-          targetBranch,
-          mrIid: args.mrIid,
-          error: error instanceof Error ? error.message.split('\n')[0] : String(error)
-        })
-        return false
-      }
-    }
+    const fetchCompareBaseRef = (): Promise<boolean> =>
+      fetchCompareBaseRefWithLocalFallback({
+        compareBaseRef,
+        fetchCompareBaseRef: (ref) => fetchRemoteTrackingRef(targetBranch, ref),
+        gitExec,
+        logLabel: '[runtime:resolveManagedMrBase]',
+        logContext: { remote, targetBranch, mrIid: args.mrIid }
+      })
 
     if (isCrossRepository) {
       const mrRef = `refs/merge-requests/${args.mrIid}/head`
-      // Why: GitLab exposes fork MR heads on the target project, so mobile/SSH
-      // can match desktop without adding the contributor fork as a remote.
+      // Why: soft-keep needs identity when the fetch throws before returning a path.
+      // Success uses the path returned by the fetch itself (writer-authoritative).
+      let softKeepLocalRefPromise: Promise<string | null> | undefined
+      const resolveSoftKeepLocalRef = (): Promise<string | null> => {
+        softKeepLocalRefPromise ??= (async () => {
+          try {
+            const { stdout } = await gitExec(['remote', 'get-url', remote])
+            const remoteUrl = stdout.trim()
+            if (!remoteUrl) {
+              return null
+            }
+            return gitlabMergeRequestHeadLocalRef(
+              reviewHeadRemoteRefComponent(remote, remoteUrl),
+              args.mrIid
+            )
+          } catch {
+            return null
+          }
+        })()
+        return softKeepLocalRefPromise
+      }
+      const resolveDurableHeadSha = async (localRef: string | null): Promise<string | null> => {
+        if (!localRef) {
+          return null
+        }
+        try {
+          const { stdout } = await gitExec(['rev-parse', '--verify', `${localRef}^{commit}`])
+          return stdout.trim() || null
+        } catch {
+          return null
+        }
+      }
       try {
-        await (sshGitProvider
-          ? sshGitProvider.fetchGitLabMergeRequestHead(repo.path, remote, args.mrIid)
-          : gitExec(['fetch', remote, mrRef]))
+        const localRef = await fetchGitLabMergeRequestHeadRef(
+          repo,
+          sshGitProvider,
+          remote,
+          args.mrIid,
+          localGitExecOptions ? { localGitExecOptions } : {}
+        )
+        const sha = await resolveDurableHeadSha(localRef)
+        if (!sha) {
+          return { error: `Could not resolve fork MR !${args.mrIid} head after fetch.` }
+        }
+        const compareBaseFetched = await fetchCompareBaseRef()
+        return { baseBranch: sha, ...(compareBaseFetched ? { compareBaseRef } : {}) }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
+        // Why: mirror compare-base — a transient transport failure must not fail
+        // the resolve when a prior fetch already pinned the durable head ref. A
+        // missing remote ref (deleted MR/fork), auth failure, or stale-relay
+        // error must fail hard: serving the durable ref there would check out a
+        // dead or unauthorized tip and mask the actionable error.
+        if (isTransientReviewHeadFetchError(error)) {
+          const localSha = await resolveDurableHeadSha(await resolveSoftKeepLocalRef())
+          if (localSha) {
+            console.warn(
+              '[runtime:resolveManagedMrBase] MR head fetch failed; using durable local ref',
+              {
+                remote,
+                mrIid: args.mrIid,
+                error: message.split('\n')[0]
+              }
+            )
+            const compareBaseFetched = await fetchCompareBaseRef()
+            return { baseBranch: localSha, ...(compareBaseFetched ? { compareBaseRef } : {}) }
+          }
+        }
         return { error: `Failed to fetch ${mrRef}: ${message.split('\n')[0]}` }
       }
-      let sha: string
-      try {
-        const { stdout } = await gitExec(['rev-parse', '--verify', 'FETCH_HEAD'])
-        sha = stdout.trim()
-      } catch {
-        return { error: `Could not resolve fork MR !${args.mrIid} head after fetch.` }
-      }
-      if (!sha) {
-        return { error: `Empty SHA resolving fork MR !${args.mrIid} head.` }
-      }
-      const compareBaseFetched = await fetchCompareBaseRef()
-      return { baseBranch: sha, ...(compareBaseFetched ? { compareBaseRef } : {}) }
     }
 
     try {
@@ -20318,22 +20440,7 @@ export class OrcaRuntimeService {
     if (connectionId) {
       const provider = requireSshGitProvider(connectionId)
       const { stdout } = await provider.exec(['remote'], repoPath)
-      const remotes = stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-      if (remotes.includes('origin')) {
-        return 'origin'
-      }
-      if (remotes.length === 1) {
-        return remotes[0]!
-      }
-      if (remotes.length === 0) {
-        throw new Error('Repo has no configured git remotes.')
-      }
-      throw new Error(
-        `Repo has multiple remotes (${remotes.join(', ')}) and no default is configured.`
-      )
+      return pickPreferredGitRemote(stdout.split('\n'))
     }
     return getDefaultRemote(repoPath, localGitOptions)
   }
