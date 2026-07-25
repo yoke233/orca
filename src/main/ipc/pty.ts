@@ -13,6 +13,7 @@ import {
 } from 'electron'
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { withTerminalPaletteEnv } from '../pty/terminal-color-env'
 import type { Store } from '../persistence'
 import type { GlobalSettings, TuiAgent } from '../../shared/types'
 import { toSshExecutionHostId } from '../../shared/execution-host'
@@ -3064,6 +3065,7 @@ export function registerPtyHandlers(
         ? { ...sshScopedEnv, ...claudeAuth.envPatch }
         : sshScopedEnv
       const requestedAgentTeamsPath = env?.ORCA_AGENT_TEAMS_TEAM_ID ? env.PATH : undefined
+      env = withTerminalPaletteEnv(env, args.terminalColorQueryReplies)
       if (args.preAllocatedHandle) {
         env = { ...env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
       }
@@ -4195,7 +4197,10 @@ export function registerPtyHandlers(
       // Why: SSH can strip ORCA_PANE_KEY when remote hooks are off; IPC tab/leaf metadata still names the pane.
       const reservationPaneKey = metadataPaneKey ?? validatedPaneKey
       const validatedLeafId = verifiedLeafId ?? metadataLeafId
-      let env: Record<string, string> | undefined = baseEnv
+      let env: Record<string, string> | undefined = withTerminalPaletteEnv(
+        baseEnv,
+        args.terminalColorQueryReplies
+      )
       const effectiveShellOverride = terminalRuntimeOptions.shellOverride
       const nativeWindowsConptySpawn = isNativeWindowsLocalPtySpawn({
         connectionId: args.connectionId,
