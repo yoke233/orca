@@ -14,6 +14,7 @@ type LocalGitExecOptions = {
 }
 
 const KNOWN_NON_GITEA_HOSTS = new Set([
+  'codeup.aliyun.com',
   'github.com',
   'gitlab.com',
   'bitbucket.org',

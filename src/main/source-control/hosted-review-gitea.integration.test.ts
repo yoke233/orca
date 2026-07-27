@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { _resetGiteaRepoRefCache } from '../gitea/repository-ref'
 import { getHostedReviewForBranch } from './hosted-review'
 
@@ -32,6 +32,7 @@ describe('Gitea hosted review integration', () => {
   afterEach(() => {
     process.env = OLD_ENV
     _resetGiteaRepoRefCache()
+    vi.unstubAllGlobals()
   })
 
   it('resolves a Gitea PR through real git remote parsing and HTTP API calls', async () => {
@@ -108,6 +109,34 @@ describe('Gitea hosted review integration', () => {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()))
       })
+    }
+  })
+
+  it('does not claim an Alibaba Codeup repository as Gitea', async () => {
+    const repoPath = await mkdtemp(join(tmpdir(), 'orca-codeup-review-'))
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('<!DOCTYPE html><html lang="zh-CN"></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+        })
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      await execFileAsync('git', ['init'], { cwd: repoPath })
+      await execFileAsync(
+        'git',
+        ['remote', 'add', 'origin', 'git@codeup.aliyun.com:account-id/team/repository.git'],
+        { cwd: repoPath }
+      )
+
+      await expect(
+        getHostedReviewForBranch({ repoPath, branch: 'refs/heads/main' })
+      ).resolves.toBeNull()
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      await rm(repoPath, { recursive: true, force: true })
     }
   })
 })
