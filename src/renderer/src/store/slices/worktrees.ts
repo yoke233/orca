@@ -257,6 +257,56 @@ function areLineageRecordsEqual(
   )
 }
 
+function areWorkspaceLineageRecordsEqual(
+  a: WorkspaceLineage | null | undefined,
+  b: WorkspaceLineage | null | undefined
+): boolean {
+  if (!a || !b) {
+    return !a && !b
+  }
+  return (
+    a.childWorkspaceKey === b.childWorkspaceKey &&
+    a.childInstanceId === b.childInstanceId &&
+    a.parentWorkspaceKey === b.parentWorkspaceKey &&
+    a.parentInstanceId === b.parentInstanceId &&
+    a.origin === b.origin &&
+    a.capture.source === b.capture.source &&
+    a.capture.confidence === b.capture.confidence &&
+    a.taskId === b.taskId &&
+    a.orchestrationRunId === b.orchestrationRunId &&
+    a.coordinatorHandle === b.coordinatorHandle &&
+    a.createdByTerminalHandle === b.createdByTerminalHandle &&
+    a.createdAt === b.createdAt
+  )
+}
+
+function lineageMapsEqual<T>(
+  current: Record<string, T>,
+  merged: Record<string, T>,
+  entryEqual: (a: T | undefined, b: T | undefined) => boolean
+): boolean {
+  const currentKeys = Object.keys(current)
+  if (currentKeys.length !== Object.keys(merged).length) {
+    return false
+  }
+  return currentKeys.every((key) => entryEqual(current[key], merged[key]))
+}
+
+function shallowEqualRecords(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) {
+    return false
+  }
+  return aKeys.every((key) => {
+    const left = a[key]
+    const right = b[key]
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return left.length === right.length && left.every((item, index) => item === right[index])
+    }
+    return left === right
+  })
+}
+
 function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): boolean {
   if (!current || current.length !== next.length) {
     return false
@@ -1216,14 +1266,34 @@ async function refreshWorktreeLineageForSettings(
 ): Promise<void> {
   const lineage = await listWorktreeLineageForRuntime(settings, options)
   const hostId = getSettingsFocusedExecutionHostId(settings)
-  set((s) => ({
-    worktreeLineageById: mergeLineageForHost(s, hostId, lineage.worktreeLineageById),
-    workspaceLineageByChildKey: mergeWorkspaceLineageForHost(
-      s,
-      hostId,
-      lineage.workspaceLineageByChildKey
+  set((s) => applyLineageMerge(s, hostId, lineage))
+}
+
+function applyLineageMerge(
+  state: AppState,
+  hostId: ExecutionHostId,
+  lineage: {
+    worktreeLineageById: Record<string, WorktreeLineage>
+    workspaceLineageByChildKey: Record<string, WorkspaceLineage>
+  }
+): AppState | Pick<AppState, 'worktreeLineageById' | 'workspaceLineageByChildKey'> {
+  const worktreeLineageById = mergeLineageForHost(state, hostId, lineage.worktreeLineageById)
+  const workspaceLineageByChildKey = mergeWorkspaceLineageForHost(
+    state,
+    hostId,
+    lineage.workspaceLineageByChildKey
+  )
+  if (
+    lineageMapsEqual(state.worktreeLineageById, worktreeLineageById, areLineageRecordsEqual) &&
+    lineageMapsEqual(
+      state.workspaceLineageByChildKey,
+      workspaceLineageByChildKey,
+      areWorkspaceLineageRecordsEqual
     )
-  }))
+  ) {
+    return state
+  }
+  return { worktreeLineageById, workspaceLineageByChildKey }
 }
 
 async function refreshRemoteWorktreeLineageBestEffort(
@@ -1238,14 +1308,7 @@ async function refreshRemoteWorktreeLineageBestEffort(
       reuseRecentCompatibilityFailure: true
     })
     const hostId = getSettingsFocusedExecutionHostId(settings)
-    set((s) => ({
-      worktreeLineageById: mergeLineageForHost(s, hostId, lineage.worktreeLineageById),
-      workspaceLineageByChildKey: mergeWorkspaceLineageForHost(
-        s,
-        hostId,
-        lineage.workspaceLineageByChildKey
-      )
-    }))
+    set((s) => applyLineageMerge(s, hostId, lineage))
   } catch (err) {
     // Why: lineage is supplemental, so a remote timeout here must not discard a successful worktree refresh.
     console.error('Failed to fetch worktree lineage:', err)
@@ -2500,12 +2563,19 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
           setup,
           matchOptions
         )
-
+        const worktreesChanged = !areWorktreesEqual(s.worktreesByRepo[repoId], mergedWorktrees)
+        if (
+          !worktreesChanged &&
+          areDetectedWorktreeResultsEqual(s.detectedWorktreesByRepo[repoId], mergedDetected) &&
+          removedIds.length === 0
+        ) {
+          return s
+        }
         return {
           // Why: a terminal can switch an active worktree's branch; refresh that live git identity but only bump sortEpoch when the payload actually changed.
           worktreesByRepo: { ...s.worktreesByRepo, [repoId]: mergedWorktrees },
           detectedWorktreesByRepo: { ...s.detectedWorktreesByRepo, [repoId]: mergedDetected },
-          sortEpoch: s.sortEpoch + 1,
+          ...(worktreesChanged ? { sortEpoch: s.sortEpoch + 1 } : {}),
           ...(removedIds.length > 0 ? buildWorktreePurgeState(s, removedIds) : {})
         }
       })
@@ -2956,21 +3026,33 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
   },
 
   updateWorktreeBaseStatus: (event) => {
-    set((s) => ({
-      baseStatusByWorktreeId: {
-        ...s.baseStatusByWorktreeId,
-        [event.worktreeId]: event
+    set((s) => {
+      const current = s.baseStatusByWorktreeId[event.worktreeId]
+      if (current && shallowEqualRecords(current, event)) {
+        return s
       }
-    }))
+      return {
+        baseStatusByWorktreeId: {
+          ...s.baseStatusByWorktreeId,
+          [event.worktreeId]: event
+        }
+      }
+    })
   },
 
   updateWorktreeRemoteBranchConflict: (event) => {
-    set((s) => ({
-      remoteBranchConflictByWorktreeId: {
-        ...s.remoteBranchConflictByWorktreeId,
-        [event.worktreeId]: event
+    set((s) => {
+      const current = s.remoteBranchConflictByWorktreeId[event.worktreeId]
+      if (current && shallowEqualRecords(current, event)) {
+        return s
       }
-    }))
+      return {
+        remoteBranchConflictByWorktreeId: {
+          ...s.remoteBranchConflictByWorktreeId,
+          [event.worktreeId]: event
+        }
+      }
+    })
   },
 
   prefetchWorktreeCreateBase: async (repoId, baseBranch) => {

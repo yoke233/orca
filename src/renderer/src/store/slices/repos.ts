@@ -828,17 +828,44 @@ function mergeFetchedProjectCompatibilityForHost({
         projectHasCurrentOwnerOutsideHost(project))
   )
   return {
-    projects: mergeProjectCompatibilityProjects(
-      preservedProjects.map((project) => {
-        const sourceRepoIds = getSourceRepoIdsOutsideHost(project, reposById, hostId)
-        return sourceRepoIds.length === project.sourceRepoIds.length
-          ? project
-          : { ...project, sourceRepoIds }
-      }),
-      fetchedProjects
+    projects: orderLikePrevious(
+      previous.projects,
+      mergeProjectCompatibilityProjects(
+        preservedProjects.map((project) => {
+          const sourceRepoIds = getSourceRepoIdsOutsideHost(project, reposById, hostId)
+          return sourceRepoIds.length === project.sourceRepoIds.length
+            ? project
+            : { ...project, sourceRepoIds }
+        }),
+        fetchedProjects
+      ),
+      (project) => project.id
     ),
-    projectHostSetups
+    projectHostSetups: orderLikePrevious(
+      previous.projectHostSetups,
+      projectHostSetups,
+      getProjectHostSetupOwnerKey
+    )
   }
+}
+
+function orderLikePrevious<T>(
+  previous: readonly T[],
+  next: readonly T[],
+  keyOf: (entry: T) => string
+): T[] {
+  const nextByKey = new Map(next.map((entry) => [keyOf(entry), entry]))
+  const ordered: T[] = []
+  for (const entry of previous) {
+    const key = keyOf(entry)
+    const match = nextByKey.get(key)
+    if (match !== undefined) {
+      ordered.push(match)
+      nextByKey.delete(key)
+    }
+  }
+  ordered.push(...nextByKey.values())
+  return ordered
 }
 
 function mergeById<T extends { id: string }>(base: readonly T[], overlay: readonly T[]): T[] {
@@ -1024,6 +1051,28 @@ async function fetchRepoCatalogForTarget(
     projectHostSetupCompatibility: await fetchProjectHostSetupCompatibility(target, repos),
     hostId: getRuntimeTargetHostId(target)
   }
+}
+
+function dropUnchangedStateKeys<T extends Record<string, unknown>>(
+  state: Record<string, unknown>,
+  partial: T
+): Partial<T> {
+  const next: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(partial)) {
+    const current = state[key]
+    if (current === value) {
+      continue
+    }
+    try {
+      if (JSON.stringify(current) === JSON.stringify(value)) {
+        continue
+      }
+    } catch {
+      // Non-serializable values are conservatively treated as changed.
+    }
+    next[key] = value
+  }
+  return next as Partial<T>
 }
 
 function mergeFetchedRepoCatalog(
@@ -1783,7 +1832,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         finalizedHostRepos = finalizedRepos.filter(
           (repo) => getRepoExecutionHostId(repo) === result.hostId
         )
-        return {
+        const changed = dropUnchangedStateKeys(s, {
           repos: finalizedRepos,
           pendingSshRepoReadoptions: reconciliation.pendingReadoptions,
           ...reconcileReadoptedSshWorktreeState(s, s.pendingSshRepoReadoptions),
@@ -1794,7 +1843,8 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
             s.setupScriptPromptDismissedRepoIds,
             validRepoIds
           )
-        }
+        })
+        return Object.keys(changed).length > 0 ? changed : s
       })
       scheduleSafeAutoForkSync(get, finalizedHostRepos)
       return finalizedHostRepos

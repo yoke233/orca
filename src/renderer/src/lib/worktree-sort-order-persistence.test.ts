@@ -23,6 +23,20 @@ const state: WorktreeRuntimeOwnerState = {
   }
 }
 
+function runtimeOnlyState(environmentId: string): WorktreeRuntimeOwnerState {
+  const repoId = `runtime-repo-${environmentId}`
+  return {
+    settings: { activeRuntimeEnvironmentId: environmentId },
+    repos: [{ id: repoId, connectionId: null, executionHostId: `runtime:${environmentId}` }],
+    worktreesByRepo: {
+      [repoId]: [
+        { id: `${repoId}::wt-a`, repoId },
+        { id: `${repoId}::wt-b`, repoId }
+      ]
+    }
+  }
+}
+
 async function collectUnhandledRejections(run: () => void): Promise<unknown[]> {
   const reasons: unknown[] = []
   const onUnhandledRejection = (reason: unknown): void => {
@@ -59,6 +73,57 @@ afterEach(() => {
 })
 
 describe('persistWorktreeSortOrderByHost', () => {
+  it('does not persist an unchanged host order more than once', async () => {
+    const dedupeState = runtimeOnlyState('dedupe')
+    const order = ['runtime-repo-dedupe::wt-a', 'runtime-repo-dedupe::wt-b']
+
+    await expect(persistWorktreeSortOrderByHost(dedupeState, order)).resolves.toBe(true)
+    await expect(persistWorktreeSortOrderByHost(dedupeState, order)).resolves.toBe(true)
+
+    expect(runtimeCall).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces a newer host order behind an in-flight write', async () => {
+    const queuedState = runtimeOnlyState('queued')
+    let resolveFirst!: () => void
+    runtimeCall.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve
+        })
+    )
+
+    persistWorktreeSortOrderByHost(queuedState, [
+      'runtime-repo-queued::wt-a',
+      'runtime-repo-queued::wt-b'
+    ])
+    persistWorktreeSortOrderByHost(queuedState, [
+      'runtime-repo-queued::wt-b',
+      'runtime-repo-queued::wt-a'
+    ])
+
+    expect(runtimeCall).toHaveBeenCalledTimes(1)
+    resolveFirst()
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(2))
+    expect(runtimeCall).toHaveBeenLastCalledWith(
+      { kind: 'environment', environmentId: 'queued' },
+      'worktree.persistSortOrder',
+      { orderedIds: ['runtime-repo-queued::wt-b', 'runtime-repo-queued::wt-a'] },
+      { timeoutMs: 15_000 }
+    )
+  })
+
+  it('retries an unchanged order after a failed write', async () => {
+    const retryState = runtimeOnlyState('retry')
+    const order = ['runtime-repo-retry::wt-a', 'runtime-repo-retry::wt-b']
+    runtimeCall.mockRejectedValueOnce(new Error('SSH disconnected'))
+
+    await expect(persistWorktreeSortOrderByHost(retryState, order)).resolves.toBe(false)
+    await expect(persistWorktreeSortOrderByHost(retryState, order)).resolves.toBe(true)
+
+    expect(runtimeCall).toHaveBeenCalledTimes(2)
+  })
+
   it('persists each owner host through the matching transport', () => {
     persistWorktreeSortOrderByHost(state, ['runtime-repo::wt-b', 'local-repo::wt-a'])
 
