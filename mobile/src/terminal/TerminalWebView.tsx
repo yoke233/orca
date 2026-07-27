@@ -23,6 +23,7 @@ export type { TerminalWebViewHandle } from './terminal-webview-contract'
 export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function TerminalWebView(
   {
     style,
+    visible = true,
     terminalTheme,
     textScale = 1,
     onWebReady,
@@ -43,6 +44,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   ref
 ) {
   const webViewRef = useRef<WebView>(null)
+  const wasVisibleRef = useRef(visible)
+  const reloadRequestedRef = useRef(false)
   const isWebReadyRef = useRef(false)
   const pendingMessages = useMemo(() => createTerminalWebViewPendingMessages(), [])
   const messageIdRef = useRef(0)
@@ -106,7 +109,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
-        onWebReady?.()
+        onWebReady?.(reloadRequestedRef.current)
+        reloadRequestedRef.current = false
       }
       // Why: reload clears queued commands, so readiness must always restore the
       // native-selected theme even when its value did not change in React.
@@ -205,8 +209,17 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   const handleReload = useCallback(() => {
     clearEngineError()
+    reloadRequestedRef.current = true
     webViewRef.current?.reload()
   }, [clearEngineError])
+
+  useEffect(() => {
+    const becameVisible = visible && !wasVisibleRef.current
+    wasVisibleRef.current = visible
+    if (becameVisible && engineError) {
+      handleReload()
+    }
+  }, [engineError, handleReload, visible])
 
   const handleContentProcessDidTerminate = useCallback(() => {
     // Why: WKWebView content-process loss is recoverable; stale commands belong
@@ -217,6 +230,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     writeCoalescer.clear()
     clearEngineError()
     armWebReadyWatchdog()
+    reloadRequestedRef.current = true
     webViewRef.current?.reload()
   }, [armWebReadyWatchdog, clearEngineError, pendingMessages, writeCoalescer])
 

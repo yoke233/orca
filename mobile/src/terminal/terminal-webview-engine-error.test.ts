@@ -123,6 +123,47 @@ describe('TerminalWebView engine errors', () => {
     expect(renderedText(renderer)).toContain('Reload')
   })
 
+  it('rebuilds the terminal subscription when the user reloads a failed WebView', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onWebReady = vi.fn()
+    const { renderer } = createTerminalWebViewRenderer(vi.fn(), { onWebReady })
+    postWebViewMessage(renderer, {
+      fatal: true,
+      message: 'terminal engine missing',
+      type: 'error'
+    })
+
+    act(() => {
+      renderer.root.findByType('Pressable').props.onPress()
+    })
+
+    expect(nativeWebViewMethods.reload).toHaveBeenCalledOnce()
+    postWebViewMessage(renderer, { type: 'web-ready' })
+    expect(onWebReady).toHaveBeenLastCalledWith(true)
+  })
+
+  it('reloads once when a failed WebView becomes visible after native chat closes', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onWebReady = vi.fn()
+    const { renderer } = createTerminalWebViewRenderer(vi.fn(), {
+      visible: false,
+      onWebReady
+    })
+    postWebViewMessage(renderer, {
+      fatal: true,
+      message: 'terminal process was discarded while covered',
+      type: 'error'
+    })
+
+    act(() => {
+      renderer.update(createElement(TerminalWebView, { visible: true, onWebReady }))
+    })
+
+    expect(nativeWebViewMethods.reload).toHaveBeenCalledOnce()
+    postWebViewMessage(renderer, { type: 'web-ready' })
+    expect(onWebReady).toHaveBeenLastCalledWith(true)
+  })
+
   it('reports non-fatal engine errors without covering a live terminal', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { onEngineError, renderer } = createTerminalWebViewRenderer()

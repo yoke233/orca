@@ -2912,7 +2912,7 @@ export default function SessionScreen() {
   }, [])
 
   const handleTerminalWebReady = useCallback(
-    (handle: string) => {
+    (handle: string, reloaded = false) => {
       const wasAlreadyReady = webReadyHandlesRef.current.has(handle)
       webReadyHandlesRef.current.add(handle)
       notifyTerminalWebReady(handle, wasAlreadyReady)
@@ -2921,7 +2921,7 @@ export default function SessionScreen() {
         wasAlreadyReady,
         handle === activeHandleRef.current
       )
-      if (wasAlreadyReady && initializedHandlesRef.current.has(handle)) {
+      if (reloaded || (wasAlreadyReady && initializedHandlesRef.current.has(handle))) {
         // Why: WebView reloaded (hot reload / Android churn); old xterm buffer is gone, so resubscribe for a fresh scrollback.
         unsubscribeTerminal(handle)
         initializedHandlesRef.current.delete(handle)
@@ -4707,7 +4707,7 @@ export default function SessionScreen() {
                   <TerminalPaneView
                     key={terminal.handle}
                     handle={terminal.handle}
-                    active={terminal.handle === activeHandle}
+                    active={terminal.handle === activeHandle && !showNativeChat}
                     keyboardLift={terminal.handle === activeHandle ? activeTerminalKeyboardLift : 0}
                     terminalTheme={terminal.terminalTheme}
                     textScale={terminalTextScale}
