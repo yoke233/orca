@@ -1,56 +1,48 @@
-import * as nodeFsPromises from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { throwIfFileListingCancelled } from './file-listing-cancellation'
-import { isQuickOpenReadableDirectory } from './quick-open-directory-validation'
+import {
+  readQuickOpenDirectoryEntries,
+  type QuickOpenFilesystem
+} from './quick-open-directory-reader'
 import { collapseQuickOpenExpansionPaths } from './quick-open-expansion-paths'
+import { classifyQuickOpenGitEntry } from './quick-open-git-entry-classification'
 import {
   HIDDEN_DIR_BLOCKLIST,
   shouldExcludeQuickOpenRelPath,
   shouldIncludeQuickOpenPath
 } from './quick-open-filter'
 import {
+  assertQuickOpenReaddirDepth,
   assertQuickOpenReaddirDeadline,
+  consumeQuickOpenReaddirDirectoryBudget,
+  consumeQuickOpenReaddirEntryBudget,
   consumeQuickOpenReaddirFileBudget,
+  consumeQuickOpenReaddirPathBudget,
   createQuickOpenReaddirBudget,
   type QuickOpenReaddirBudget
 } from './quick-open-readdir-budget'
 
 export {
+  classifyQuickOpenGitEntry,
+  parseQuickOpenGitLsFilesEntry,
+  type QuickOpenGitEntryKind,
+  type QuickOpenGitLsFilesEntry
+} from './quick-open-git-entry-classification'
+
+export {
   createQuickOpenReaddirBudget,
   isQuickOpenReaddirBudgetError,
+  QUICK_OPEN_READDIR_MAX_DEPTH,
+  QUICK_OPEN_READDIR_MAX_DIRECTORIES,
+  QUICK_OPEN_READDIR_MAX_ENTRIES,
   QUICK_OPEN_READDIR_MAX_FILES,
+  QUICK_OPEN_READDIR_MAX_PATH_CODE_UNITS,
   QUICK_OPEN_READDIR_TIMEOUT_MS
 } from './quick-open-readdir-budget'
 
+export type { QuickOpenFilesystem } from './quick-open-directory-reader'
+
 const QUICK_OPEN_READDIR_CONCURRENCY = 32
-
-export type QuickOpenFilesystem = Pick<typeof nodeFsPromises, 'lstat' | 'readdir'>
-
-export type QuickOpenGitEntryKind = 'keep' | 'fill-nested-repo' | 'drop-placeholder'
-
-export type QuickOpenGitLsFilesEntry = {
-  path: string
-  isGitlink: boolean
-  isUntrackedDir: boolean
-}
-
-const GIT_LS_FILES_STAGE_ENTRY = /^([0-7]{6}) [0-9a-f]{40,64} [0-3]\t/
-
-export function parseQuickOpenGitLsFilesEntry(entry: string): QuickOpenGitLsFilesEntry {
-  const match = GIT_LS_FILES_STAGE_ENTRY.exec(entry)
-  if (match) {
-    return {
-      path: entry.slice(match[0].length),
-      isGitlink: match[1] === '160000',
-      isUntrackedDir: false
-    }
-  }
-  return {
-    path: entry,
-    isGitlink: false,
-    isUntrackedDir: entry.endsWith('/')
-  }
-}
 
 function shouldDescend(name: string): boolean {
   return name !== 'node_modules' && !HIDDEN_DIR_BLOCKLIST.has(name)
@@ -87,48 +79,6 @@ function rebaseExcludePrefixesForSubtree(
   return rebased
 }
 
-async function hasGitEntry(absPath: string, fs: QuickOpenFilesystem = nodeFsPromises) {
-  try {
-    const stat = await fs.lstat(join(absPath, '.git'))
-    return stat.isDirectory() || stat.isFile()
-  } catch {
-    return false
-  }
-}
-
-export async function classifyQuickOpenGitEntry(
-  rootPath: string,
-  entry: string,
-  filesystem: QuickOpenFilesystem = nodeFsPromises
-): Promise<{ kind: QuickOpenGitEntryKind; relPath: string }> {
-  const parsed = parseQuickOpenGitLsFilesEntry(entry)
-  const relPath = normalizeGitEntry(parsed.path)
-  if (!relPath) {
-    return { kind: 'drop-placeholder', relPath }
-  }
-
-  if (!parsed.isGitlink && !parsed.isUntrackedDir) {
-    return { kind: 'keep', relPath }
-  }
-
-  let stat
-  try {
-    stat = await filesystem.lstat(joinRootRel(rootPath, relPath))
-  } catch {
-    return { kind: 'drop-placeholder', relPath }
-  }
-
-  if (!stat.isDirectory()) {
-    return { kind: 'drop-placeholder', relPath }
-  }
-
-  if (await hasGitEntry(joinRootRel(rootPath, relPath), filesystem)) {
-    return { kind: 'fill-nested-repo', relPath }
-  }
-
-  return { kind: 'drop-placeholder', relPath }
-}
-
 export async function listQuickOpenFilesWithReaddir(
   rootPath: string,
   opts: {
@@ -150,7 +100,7 @@ export async function listQuickOpenFilesWithReaddir(
       }
     ],
     opts.budget ?? createQuickOpenReaddirBudget(),
-    opts.filesystem ?? nodeFsPromises,
+    opts.filesystem,
     opts.signal,
     opts.maxResults
   )
@@ -168,19 +118,27 @@ type QuickOpenReaddirRoot = {
 async function listQuickOpenFilesFromRoots(
   roots: readonly QuickOpenReaddirRoot[],
   budget: QuickOpenReaddirBudget,
-  fs: QuickOpenFilesystem,
+  filesystem: QuickOpenFilesystem | undefined,
   signal?: AbortSignal,
-  maxResults?: number
+  maxResults?: number,
+  knownFiles?: ReadonlySet<string>
 ): Promise<string[]> {
   const files: string[] = []
   if (maxResults !== undefined && maxResults <= 0) {
     return files
   }
-  let pendingDirectories = roots.map((root) => ({
-    root,
-    absPath: root.rootPath,
-    isRoot: true
-  }))
+  let pendingDirectories: {
+    root: QuickOpenReaddirRoot
+    absPath: string
+    depth: number
+    isRoot: boolean
+  }[] = []
+  for (const root of roots) {
+    assertQuickOpenReaddirDepth(budget, 0)
+    consumeQuickOpenReaddirDirectoryBudget(budget)
+    consumeQuickOpenReaddirPathBudget(budget, root.rootPath)
+    pendingDirectories.push({ root, absPath: root.rootPath, depth: 0, isRoot: true })
+  }
 
   while (pendingDirectories.length > 0) {
     const nextDirectories: typeof pendingDirectories = []
@@ -195,32 +153,30 @@ async function listQuickOpenFilesFromRoots(
       throwIfFileListingCancelled(signal)
       assertQuickOpenReaddirDeadline(budget)
       const batch = pendingDirectories.slice(offset, offset + QUICK_OPEN_READDIR_CONCURRENCY)
-      const entryGroups = await Promise.all(
+      const readResults = await Promise.allSettled(
         batch.map(async (pending) => {
-          try {
-            // Why: Git's placeholder may have been replaced with a symlink
-            // before expansion. Never let readdir follow it outside the root.
-            const stat = await fs.lstat(pending.absPath)
-            const allowSymlinkedRoot = pending.isRoot && pending.root.allowRootSymlink
-            if (!isQuickOpenReadableDirectory(stat, allowSymlinkedRoot)) {
-              return { pending, entries: [] }
-            }
-            const entries = await fs.readdir(pending.absPath, { withFileTypes: true })
-            // Why: close the ordinary check/use race. If the directory became
-            // a symlink while readdir was pending, discard everything read.
-            const statAfterRead = await fs.lstat(pending.absPath)
-            if (!isQuickOpenReadableDirectory(statAfterRead, allowSymlinkedRoot)) {
-              return { pending, entries: [] }
-            }
-            return { pending, entries }
-          } catch {
-            // Why: permission denied on one subtree is common for broad roots.
-            return { pending, entries: [] }
-          }
+          const entries = await readQuickOpenDirectoryEntries({
+            absPath: pending.absPath,
+            allowSymlinkedRoot: Boolean(pending.isRoot && pending.root.allowRootSymlink),
+            budget,
+            filesystem,
+            signal
+          })
+          return { pending, entries }
         })
       )
+      const entryGroups: {
+        pending: (typeof pendingDirectories)[number]
+        entries: Awaited<ReturnType<typeof readQuickOpenDirectoryEntries>>
+      }[] = []
+      for (const result of readResults) {
+        if (result.status === 'rejected') {
+          throw result.reason
+        }
+        entryGroups.push(result.value)
+      }
       // Why: an empty directory has no per-entry checkpoint below. Cancellation
-      // or timeout that lands during readdir must still reject, never resolve [].
+      // or timeout that lands during opendir must still reject, never resolve [].
       throwIfFileListingCancelled(signal)
       assertQuickOpenReaddirDeadline(budget)
 
@@ -238,22 +194,29 @@ async function listQuickOpenFilesFromRoots(
           if (shouldExcludeQuickOpenRelPath(relPath, pending.root.excludePathPrefixes)) {
             continue
           }
-          if (entry.isDirectory()) {
+          if (entry.kind === 'directory') {
             if (shouldDescend(name) && shouldIncludeQuickOpenPath(workspaceRelPath)) {
-              nextDirectories.push({ root: pending.root, absPath, isRoot: false })
+              const depth = pending.depth + 1
+              assertQuickOpenReaddirDepth(budget, depth)
+              consumeQuickOpenReaddirDirectoryBudget(budget)
+              consumeQuickOpenReaddirPathBudget(budget, absPath)
+              nextDirectories.push({ root: pending.root, absPath, depth, isRoot: false })
             }
             continue
           }
           if (
-            (entry.isFile() || (pending.root.includeSymlinks && entry.isSymbolicLink())) &&
+            (entry.kind === 'file' || (pending.root.includeSymlinks && entry.kind === 'symlink')) &&
             shouldIncludeQuickOpenPath(workspaceRelPath)
           ) {
+            const outputPath = pending.root.outputPathPrefix
+              ? `${pending.root.outputPathPrefix}/${relPath}`
+              : relPath
+            if (knownFiles?.has(outputPath)) {
+              continue
+            }
             consumeQuickOpenReaddirFileBudget(budget)
-            files.push(
-              pending.root.outputPathPrefix
-                ? `${pending.root.outputPathPrefix}/${relPath}`
-                : relPath
-            )
+            consumeQuickOpenReaddirPathBudget(budget, outputPath)
+            files.push(outputPath)
             // Why: a caller result limit is a successful bounded prefix, while
             // the separate traversal budget still rejects incomplete scans.
             if (maxResults !== undefined && files.length >= maxResults) {
@@ -279,6 +242,9 @@ export async function expandQuickOpenGitFileListing(opts: {
   maxResults?: number
   signal?: AbortSignal
 }): Promise<string[]> {
+  if (opts.maxResults !== undefined && opts.maxResults <= 0) {
+    return []
+  }
   const files = new Set<string>()
   const excludePathPrefixes = opts.excludePathPrefixes ?? []
   const budget = opts.budget ?? createQuickOpenReaddirBudget()
@@ -313,6 +279,8 @@ export async function expandQuickOpenGitFileListing(opts: {
       continue
     }
 
+    consumeQuickOpenReaddirEntryBudget(budget)
+    consumeQuickOpenReaddirPathBudget(budget, relPath)
     expansionPaths.set(relPath, expansionPaths.get(relPath) ?? false)
   }
 
@@ -331,6 +299,8 @@ export async function expandQuickOpenGitFileListing(opts: {
       continue
     }
 
+    consumeQuickOpenReaddirEntryBudget(budget)
+    consumeQuickOpenReaddirPathBudget(budget, relPath)
     // Why: before directory collapse, Git returned untracked symlink entries
     // without following them. Preserve those paths when expanding placeholders.
     expansionPaths.set(relPath, true)
@@ -349,9 +319,10 @@ export async function expandQuickOpenGitFileListing(opts: {
       includeSymlinks
     })),
     budget,
-    opts.filesystem ?? nodeFsPromises,
+    opts.filesystem,
     opts.signal,
-    opts.maxResults === undefined ? undefined : Math.max(0, opts.maxResults - files.size)
+    opts.maxResults === undefined ? undefined : Math.max(0, opts.maxResults - files.size),
+    files
   )
   for (const expandedFile of expandedFiles) {
     addFinalPath(expandedFile)

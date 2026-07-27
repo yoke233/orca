@@ -9,7 +9,6 @@ import {
   closeSync,
   mkdirSync,
   openSync,
-  readdirSync,
   readSync,
   renameSync,
   statSync,
@@ -21,7 +20,6 @@ import { isAbsolute, join } from 'node:path'
 import {
   AGENT_MODEL_MAX_LENGTH,
   normalizeAgentStatusPayload,
-  parseAgentStatusPayload,
   type AgentStatusState,
   type AgentSubagentSnapshot,
   type ParsedAgentStatusPayload
@@ -64,9 +62,21 @@ import {
   resolveGrokChatHistoryPathSync,
   resolveGrokSessionsDir
 } from './grok-session-paths'
+import { sweepStaleAgentHookEndpointTemps } from './agent-hook-endpoint-temp-cleanup'
+import { assertJsonTextStructureWithinLimits } from './json-text-structure-limit'
 
 /** Maximum request body size accepted by the listener (1 MB). */
 export const HOOK_REQUEST_MAX_BYTES = 1_000_000
+const HOOK_REQUEST_INITIAL_BUFFER_BYTES = 4 * 1024
+const AGENT_HOOK_JSON_STRUCTURE_LIMITS = {
+  structuralTokens: 128 * 1024,
+  nestingDepth: 64
+} as const
+
+function parseAgentHookJson(content: string): unknown {
+  assertJsonTextStructureWithinLimits(content, AGENT_HOOK_JSON_STRUCTURE_LIMITS)
+  return JSON.parse(content) as unknown
+}
 
 /** Bound the warn-once Sets so a client varying `version`/`env` per request can't grow them unbounded. */
 const MAX_WARNED_KEYS = 32
@@ -303,7 +313,7 @@ export function parseFormEncodedBody(body: string): Record<string, string> {
 
 export function readRequestBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
+    let retained = Buffer.alloc(0)
     let byteLength = 0
     let settled = false
     const cleanup = (): void => {
@@ -332,21 +342,30 @@ export function readRequestBody(req: IncomingMessage): Promise<unknown> {
     }
     const onData = (chunk: Buffer): void => {
       // Why: bound by bytes (not UTF-16 units) and stop accumulating after rejection so a client can't push memory past the cap.
-      if (byteLength + chunk.length > HOOK_REQUEST_MAX_BYTES) {
+      const nextByteLength = byteLength + chunk.length
+      if (nextByteLength > HOOK_REQUEST_MAX_BYTES) {
         settleReject(new Error('payload too large'))
         req.destroy()
         return
       }
-      byteLength += chunk.length
-      chunks.push(chunk)
+      if (retained.length < nextByteLength) {
+        const nextCapacity = Math.min(
+          HOOK_REQUEST_MAX_BYTES,
+          Math.max(HOOK_REQUEST_INITIAL_BUFFER_BYTES, retained.length * 2, nextByteLength)
+        )
+        const next = Buffer.allocUnsafe(nextCapacity)
+        retained.copy(next, 0, 0, byteLength)
+        retained = next
+      }
+      chunk.copy(retained, byteLength)
+      byteLength = nextByteLength
     }
     const onEnd = (): void => {
       try {
-        // Why: Buffer.concat before decode so multi-byte UTF-8 straddling a chunk boundary reassembles correctly.
-        const body = chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : ''
+        const body = retained.toString('utf8', 0, byteLength)
         const contentType = req.headers['content-type'] ?? ''
         if (typeof contentType === 'string' && contentType.includes('application/json')) {
-          settleResolve(body ? JSON.parse(body) : {})
+          settleResolve(body ? parseAgentHookJson(body) : {})
           return
         }
         if (
@@ -357,7 +376,7 @@ export function readRequestBody(req: IncomingMessage): Promise<unknown> {
           return
         }
         // Why: managed scripts POST JSON, updated POSIX scripts form-encoded; default to JSON for unknown content types.
-        settleResolve(body ? JSON.parse(body) : {})
+        settleResolve(body ? parseAgentHookJson(body) : {})
       } catch (error) {
         settleReject(error)
       }
@@ -779,7 +798,7 @@ function parseJsonObjectString(value: unknown): Record<string, unknown> | undefi
     return undefined
   }
   try {
-    const parsed = JSON.parse(value) as unknown
+    const parsed = parseAgentHookJson(value)
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : undefined
@@ -824,7 +843,7 @@ const GROK_HOME_ENVELOPE_MAX_LENGTH = 4096
 function extractAssistantTextFromLine(line: string): string | undefined {
   let entry: unknown
   try {
-    entry = JSON.parse(line)
+    entry = parseAgentHookJson(line)
   } catch {
     return undefined
   }
@@ -890,7 +909,7 @@ function extractAntigravityUserRequest(content: string): string | undefined {
 function extractUserPromptTextFromLine(line: string): string | undefined {
   let entry: unknown
   try {
-    entry = JSON.parse(line)
+    entry = parseAgentHookJson(line)
   } catch {
     return undefined
   }
@@ -925,7 +944,7 @@ function readLastUserPromptFromTranscript(transcriptPath: unknown): string | und
 function extractCommandCodeUserPromptFromLine(line: string): string | undefined {
   let entry: unknown
   try {
-    entry = JSON.parse(line)
+    entry = parseAgentHookJson(line)
   } catch {
     return undefined
   }
@@ -1021,7 +1040,7 @@ function* iterateTranscriptLinesWithByteOffsets(
 function extractCommandCodeAssistantTextFromLine(line: string): string | undefined {
   let entry: unknown
   try {
-    entry = JSON.parse(line)
+    entry = parseAgentHookJson(line)
   } catch {
     return undefined
   }
@@ -1068,7 +1087,7 @@ function parseHookBodyPayloadRecord(body: unknown): Record<string, unknown> | nu
     typeof rawPayload === 'string'
       ? (() => {
           try {
-            return JSON.parse(rawPayload) as unknown
+            return parseAgentHookJson(rawPayload)
           } catch {
             return null
           }
@@ -2344,22 +2363,21 @@ function normalizeClaudeSubagentLifecycleEvent(
   paneKey: string,
   hookPayload: Record<string, unknown>
 ): ParsedAgentStatusPayload | null {
+  const lifecycleField = eventName === 'TeammateIdle' ? 'teammate_name' : 'agent_id'
+  const lifecycleId = readString(hookPayload, lifecycleField)
+  if (!lifecycleId) {
+    return null
+  }
   const roster = getOrCreateClaudeSubagentRoster(state, paneKey)
   if (eventName === 'TeammateIdle') {
-    const teammateName = readString(hookPayload, 'teammate_name')
-    if (!teammateName) {
-      return null
-    }
+    const teammateName = lifecycleId
     // Why: on claude 2.1.21x teammates are turn-based — TeammateIdle means "turn over, awaiting mail", not finished. The row parks as idle (confirmed teammate) instead of leaving, so the sidebar keeps showing resumable children.
     idleClaudeTeammateByName(roster, teammateName)
     clearClaudePendingWaitForAgent(state, paneKey, (waitingAgentId) =>
       claudeTeammateIdMatchesName(waitingAgentId, teammateName)
     )
   } else {
-    const agentId = readString(hookPayload, 'agent_id')
-    if (!agentId) {
-      return null
-    }
+    const agentId = lifecycleId
     if (eventName === 'SubagentStart') {
       upsertWorkingClaudeSubagent(
         roster,
@@ -2665,20 +2683,18 @@ function normalizeDevinEvent(
   const interrupted =
     eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('devin', eventName)
-      }),
-      agentType: 'devin',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('devin', eventName)
+    }),
+    agentType: 'devin',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 // Why: Kimi's auto-allowed AskUserQuestion emits PreToolUse (not PermissionRequest) while awaiting an answer; treat as waiting so the UI shows the attention icon, not a spinner.
@@ -2725,19 +2741,17 @@ function normalizeKimiEvent(
   const interrupted =
     eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('kimi', eventName)
-      }),
-      agentType: 'kimi',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('kimi', eventName)
+    }),
+    agentType: 'kimi',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 function normalizeGeminiEvent(
@@ -2770,19 +2784,17 @@ function normalizeGeminiEvent(
     { resetOnNewTurn: isNewTurnEvent('gemini', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('gemini', eventName)
-      }),
-      agentType: 'gemini',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('gemini', eventName)
+    }),
+    agentType: 'gemini',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function isAntigravityFeedbackTool(toolName: string | undefined): boolean {
@@ -2844,19 +2856,17 @@ function normalizeAntigravityEvent(
     { resetOnNewTurn: resetsTurn }
   )
 
-  const payload = parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: resetsTurn
-      }),
-      agentType: 'antigravity',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  const payload = normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: resetsTurn
+    }),
+    agentType: 'antigravity',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
   // Why: Antigravity can emit Stop with fullyIdle=false between tool steps; only a fully idle Stop is terminal, else the sidebar bounces done -> working and ignores later tool updates.
   if (eventName === 'Stop' && !stopStillBusy && transcriptPath) {
     state.antigravityCompletedTranscriptByPaneKey.set(paneKey, transcriptPath)
@@ -2922,21 +2932,19 @@ function normalizeAmpEvent(
     (eventName === 'agent.end' && !state.lastPromptByPaneKey.has(ampCacheKey))
   const ampPromptText = explicitPrompt ?? (canUseMessageAsPrompt ? promptText : '')
 
-  const normalized = parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      // Why: Amp tool/result events may use `message` for tool output; only lifecycle events may treat it as the turn prompt.
-      prompt: resolvePrompt(state, ampCacheKey, ampPromptText, {
-        resetOnNewTurn: isNewTurnEvent('amp', eventName)
-      }),
-      agentType: 'amp',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  const normalized = normalizeAgentStatusPayload({
+    state: stateName,
+    // Why: Amp tool/result events may use `message` for tool output; only lifecycle events may treat it as the turn prompt.
+    prompt: resolvePrompt(state, ampCacheKey, ampPromptText, {
+      resetOnNewTurn: isNewTurnEvent('amp', eventName)
+    }),
+    agentType: 'amp',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
   if (normalized && eventName === 'agent.end') {
     state.ampCompletedCacheKeys.add(ampCacheKey)
   }
@@ -3316,19 +3324,17 @@ function normalizeOpenCodeFamilyEvent(
     { resetOnNewTurn: isNewTurnEvent(source, eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent(source, eventName)
-      }),
-      agentType: source,
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent(source, eventName)
+    }),
+    agentType: source,
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeCursorEvent(
@@ -3376,20 +3382,18 @@ function normalizeCursorEvent(
       ? true
       : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('cursor', eventName)
-      }),
-      agentType: 'cursor',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('cursor', eventName)
+    }),
+    agentType: 'cursor',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 // Why: Copilot PermissionRequest fires before allow/ask/deny (stays working); ask_user and notification prompts are the real blocked signals.
@@ -3439,19 +3443,17 @@ function normalizeCopilotEvent(
 
   const effectivePrompt = normalizedEventName === 'Notification' ? '' : promptText
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('copilot', normalizedEventName)
-      }),
-      agentType: 'copilot',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('copilot', normalizedEventName)
+    }),
+    agentType: 'copilot',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizePiCompatibleEvent(
@@ -3498,19 +3500,17 @@ function normalizePiCompatibleEvent(
     { resetOnNewTurn: isNewTurnEvent(agentType, eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent(agentType, eventName)
-      }),
-      agentType,
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent(agentType, eventName)
+    }),
+    agentType,
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeDroidEvent(
@@ -3565,19 +3565,17 @@ function normalizeDroidEvent(
   // Why: Droid Notification.message is status text, not the prompt; '' keeps resolvePrompt's cached UserPromptSubmit value.
   const effectivePrompt = eventName === 'Notification' ? '' : promptText
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('droid', eventName)
-      }),
-      agentType: 'droid',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('droid', eventName)
+    }),
+    agentType: 'droid',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeCommandCodeEvent(
@@ -3604,19 +3602,17 @@ function normalizeCommandCodeEvent(
     { resetOnNewTurn: isNewTurnEvent('command-code', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('command-code', eventName)
-      }),
-      agentType: 'command-code',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('command-code', eventName)
+    }),
+    agentType: 'command-code',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeGrokEvent(
@@ -3690,19 +3686,17 @@ function normalizeGrokEvent(
     ? ''
     : stripGrokUserQueryWrapper(promptText)
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('grok', eventName)
-      }),
-      agentType: 'grok',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('grok', eventName)
+    }),
+    agentType: 'grok',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeHermesEvent(
@@ -3739,19 +3733,17 @@ function normalizeHermesEvent(
     { resetOnNewTurn: isNewTurnEvent('hermes', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('hermes', eventName)
-      }),
-      agentType: 'hermes',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('hermes', eventName)
+    }),
+    agentType: 'hermes',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
@@ -3781,7 +3773,7 @@ export function normalizeHookPayload(
     typeof rawPayload === 'string'
       ? (() => {
           try {
-            return JSON.parse(rawPayload)
+            return parseAgentHookJson(rawPayload)
           } catch {
             return null
           }
@@ -4065,26 +4057,8 @@ export function writeEndpointFile(
         // best-effort
       }
     }
-    // Why: sweep stale .endpoint-*.tmp orphans (crash between write and rename) so the dir can't grow unbounded.
-    try {
-      const entries = readdirSync(endpointDir)
-      const cutoff = Date.now() - 5 * 60 * 1000
-      for (const entry of entries) {
-        if (!entry.startsWith('.endpoint-') || !entry.endsWith('.tmp')) {
-          continue
-        }
-        const entryPath = join(endpointDir, entry)
-        try {
-          if (statSync(entryPath).mtimeMs < cutoff) {
-            unlinkSync(entryPath)
-          }
-        } catch {
-          // best-effort sweep
-        }
-      }
-    } catch {
-      // readdirSync can fail on exotic filesystems
-    }
+    // Why: crash-orphan cleanup must not materialize a tampered, enormous directory.
+    sweepStaleAgentHookEndpointTemps(endpointDir)
     const separator = process.platform === 'win32' ? '\r\n' : '\n'
     writeFileSync(tmpPath, lines.join(separator), { mode: 0o600 })
     tmpWritten = true
