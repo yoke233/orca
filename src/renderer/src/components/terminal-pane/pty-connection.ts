@@ -87,6 +87,7 @@ import {
   registerTerminalPaneRecoveryInstance,
   requestTerminalPaneRecovery
 } from './terminal-pane-recovery'
+import { shouldDropQuarantinedTerminalInput } from './terminal-input-quarantine'
 import {
   isDocumentVisibilityProvenStale,
   registerStaleDocumentVisibilityRecovery
@@ -3662,7 +3663,11 @@ export function connectPanePty(
       // and a disconnected remote pane would otherwise remount-churn on every
       // cooldown window while typing. Local panes keep the lenient gate.
       requireAuthoritativeLiveness:
-        Boolean(transport.getConnectionId?.()) || isRemoteRuntimePtyId(undeliverablePtyId)
+        Boolean(transport.getConnectionId?.()) || isRemoteRuntimePtyId(undeliverablePtyId),
+      // Why only the rejected path: it is the only one whose remount can land on
+      // a fresh shell. A stalled-pipeline remount always reattaches to the same
+      // shell, so its half-typed line is still on screen and intact.
+      endpointReplaced: providerRejected
     })
   }
   // Why: the write-pipeline health watch (scheduler stall probe, replay-guard
@@ -3741,6 +3746,15 @@ export function connectPanePty(
     // so a real keystroke never reaches this branch.
     if (isTerminalQueryReply(data)) {
       sendDesktopQueryReplyImmediate(data)
+      return
+    }
+    // Why after the query-reply branch: device replies are not user input and
+    // must always reach the shell, or a program querying during reattach hangs.
+    // Why at all: a replaced endpoint reattaches to a fresh shell, so the tail
+    // of the interrupted line would be submitted by the user's own Enter and a
+    // compound command could run its surviving half (#10065 follow-up).
+    if (shouldDropQuarantinedTerminalInput(deps.tabId, data)) {
+      clearPendingTerminalInputIntent()
       return
     }
     const intent = pendingTerminalInputIntent
@@ -5660,13 +5674,13 @@ export function connectPanePty(
       recordTerminalOutput(pane.terminal)
     }
 
-    function consumeForegroundImmediateBudget(dataLength: number): boolean {
+    function consumeForegroundImmediateBudget(dataLength: number, maxChars: number): boolean {
       const now = performance.now()
       if (now - foregroundImmediateBudgetWindowStart > FOREGROUND_BUDGET_WINDOW_MS) {
         foregroundImmediateBudgetChars = 0
         foregroundImmediateBudgetWindowStart = now
       }
-      if (foregroundImmediateBudgetChars + dataLength > FOREGROUND_IMMEDIATE_BUDGET_CHARS) {
+      if (foregroundImmediateBudgetChars + dataLength > maxChars) {
         return false
       }
       foregroundImmediateBudgetChars += dataLength
@@ -5689,17 +5703,22 @@ export function connectPanePty(
         }
         return consumeInactiveForegroundImmediateBudget(data.length)
       }
-      if (data.length <= FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS) {
-        return consumeForegroundImmediateBudget(data.length)
-      }
       const recentInput =
         performance.now() - lastTerminalInputAt <= FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
+      if (data.length <= FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS) {
+        return consumeForegroundImmediateBudget(
+          data.length,
+          recentInput
+            ? FOREGROUND_IMMEDIATE_BUDGET_CHARS
+            : INACTIVE_FOREGROUND_IMMEDIATE_BUDGET_CHARS
+        )
+      }
       if (
         recentInput &&
         data.length <= FOREGROUND_INTERACTIVE_REDRAW_CHARS &&
         data.includes('\x1b[')
       ) {
-        return consumeForegroundImmediateBudget(data.length)
+        return consumeForegroundImmediateBudget(data.length, FOREGROUND_IMMEDIATE_BUDGET_CHARS)
       }
       return false
     }

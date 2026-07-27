@@ -4535,13 +4535,63 @@ describe('OrcaRuntimeRpcServer', () => {
       }
     })
 
+    it.each(['worktree.create', 'worktree.rm'] as const)(
+      'keeps %s alive without consuming long-poll capacity',
+      async (method) => {
+        const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+        const runtime = new OrcaRuntimeService()
+        const server = new OrcaRuntimeRpcServer({
+          runtime,
+          userDataPath,
+          keepaliveIntervalMs: 20
+        })
+        const originalDispatch = server['dispatcher'].dispatch.bind(server['dispatcher'])
+        const observedLongPollCounts: number[] = []
+        server['dispatcher'].dispatch = vi.fn(async (request, context) => {
+          if (request.method !== method) {
+            return await originalDispatch(request, context)
+          }
+          observedLongPollCounts.push(server['activeLongPolls'])
+          await sleep(80)
+          observedLongPollCounts.push(server['activeLongPolls'])
+          return {
+            id: request.id,
+            ok: true as const,
+            result: {},
+            _meta: { runtimeId: runtime.getRuntimeId() }
+          }
+        })
+        await server.start()
+
+        try {
+          const metadata = readRuntimeMetadata(userDataPath)
+          const session = openFramedSession(metadata!.transports[0]!.endpoint, {
+            id: `req_${method}`,
+            authToken: metadata!.authToken,
+            method
+          })
+          await session.done
+
+          const keepalives = session.frames.filter((frame) => frame._keepalive === true)
+          const terminals = session.frames.filter((frame) => frame.ok !== undefined)
+          expect(keepalives.length).toBeGreaterThanOrEqual(1)
+          expect(terminals).toHaveLength(1)
+          expect(terminals[0]).toMatchObject({ id: `req_${method}`, ok: true })
+          expect(observedLongPollCounts).toEqual([0, 0])
+        } finally {
+          server['dispatcher'].dispatch = originalDispatch
+          await server.stop()
+        }
+      }
+    )
+
     it('does not emit keepalive frames for short RPCs', async () => {
       const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
       const runtime = new OrcaRuntimeService()
       // Why: a 10ms interval means any frame in the first ~100ms of a short
       // RPC would show up; `status.get` returns in <10ms so no keepalive
-      // should ever fire. Locks in the "keepalive is long-poll-only" invariant
-      // so a future refactor can't silently re-broaden the timer.
+      // should ever fire. Locks in the short-RPC invariant so a future refactor
+      // can't silently arm timers for every request.
       const server = new OrcaRuntimeRpcServer({
         runtime,
         userDataPath,

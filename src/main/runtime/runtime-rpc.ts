@@ -403,7 +403,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
 // Why: 'ask' is metered separately from 'wait' — same keepalive/abort wiring, its own sub-cap.
 type LongPollClass = 'ask' | 'wait'
 
-// Why: single classifier for long-poll requests (handlers that block on an external event), shared by counter/abort/keepalive. See §3.1.
+// Why: single classifier for long-poll requests (handlers that block on an external event), shared by counter and abort wiring. See §3.1.
 function longPollClassOf(request: RpcRequest): LongPollClass | null {
   if (request.method === 'terminal.wait') {
     return 'wait'
@@ -421,6 +421,12 @@ function longPollClassOf(request: RpcRequest): LongPollClass | null {
     return params?.wait === true ? 'wait' : null
   }
   return null
+}
+
+function needsKeepalive(request: RpcRequest, longPoll: LongPollClass | null): boolean {
+  return (
+    longPoll !== null || request.method === 'worktree.create' || request.method === 'worktree.rm'
+  )
 }
 
 // Why: status.get has no per-connection context in the dispatcher, so stamp the scope here at the transport boundary.
@@ -1039,8 +1045,7 @@ export class OrcaRuntimeRpcServer {
     if (rejection) {
       return this.buildError(request.id, 'runtime_busy', rejection)
     }
-    if (longPoll) {
-      // Why: arm keepalive only for long-polls; short RPCs never create the setInterval. See §3.1.
+    if (needsKeepalive(request, longPoll)) {
       context?.startKeepalive()
     }
 

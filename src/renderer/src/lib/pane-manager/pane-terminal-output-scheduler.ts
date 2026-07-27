@@ -1168,8 +1168,8 @@ export function writeTerminalOutput(
       if (queueCapExceeded(queued)) {
         replaceBacklogWithWarning(queued, FOREGROUND_BACKLOG_WARNING)
       }
-      // Why: visible command floods are throughput work, not keystroke echo — queue behind a zero-delay drain so one IPC callback can't pin the renderer while input/paint wait.
-      scheduleDrain(0)
+      // Why: one frame lets autonomous chunks from adjacent IPC tasks coalesce; keystroke echo never enters this branch.
+      scheduleDrain(BACKGROUND_DRAIN_INTERVAL_MS)
       return
     }
     flushTerminalOutput(terminal)

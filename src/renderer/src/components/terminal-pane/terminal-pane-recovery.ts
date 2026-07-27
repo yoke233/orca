@@ -1,5 +1,9 @@
 import { useAppStore } from '@/store'
 import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
+import {
+  _resetTerminalInputQuarantineForTests,
+  armTerminalInputQuarantine
+} from './terminal-input-quarantine'
 
 // Why this module exists: a terminal pane can die renderer-side while its PTY
 // stays alive — a wedged xterm WriteBuffer (issue #2836), a disposed xterm
@@ -34,6 +38,9 @@ type RecoveryRequest = {
    *  registry doesn't own, and treating null as "proceed" would let a
    *  disconnected remote pane churn reconnects on every cooldown window. */
   requireAuthoritativeLiveness?: boolean
+  /** The provider rejected a write because the endpoint stopped accepting it,
+   * so a successful remount may attach to a fresh shell. */
+  endpointReplaced?: boolean
 }
 
 // Why a cap exists: recovery must never loop. If the remounted pane wedges
@@ -261,6 +268,9 @@ export async function requestTerminalPaneRecovery(request: RecoveryRequest): Pro
   // A remount replaces every pane xterm in the tab; a previously scheduled
   // retry would only re-remount the fresh, healthy panes.
   cancelPendingRecoveryRetry(request.tabId)
+  if (request.endpointReplaced) {
+    armTerminalInputQuarantine(request.tabId)
+  }
   console.error(
     `[terminal] recovering pane tab ${request.tabId} — ${request.reason} with a live PTY (${request.ptyId ?? 'unbound'}); remounting to rebuild the renderer`
   )
@@ -280,4 +290,5 @@ export function _resetTerminalPaneRecoveryForTests(): void {
     clearTimeout(pendingRetry.timer)
   }
   pendingRetryByTabId.clear()
+  _resetTerminalInputQuarantineForTests()
 }
