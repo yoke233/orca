@@ -480,6 +480,8 @@ describe('requestTerminalPaneRecovery', () => {
     )
   })
 
+  // Why: quarantine suppresses real keystrokes, so arming it on a recovery that
+  // kept the same shell would eat a legitimate command (#10065 follow-up).
   describe('input quarantine arming', () => {
     it('arms after a replaced endpoint so the mangled line cannot be submitted', async () => {
       const result = await requestTerminalPaneRecovery({
