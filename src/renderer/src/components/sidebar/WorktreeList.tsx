@@ -5490,35 +5490,13 @@ const WorktreeList = React.memo(function WorktreeList({
   }, [sortBy])
 
   // Why: only persist during live sessions so cold start reads the persisted order instead of overwriting it.
-  const lastPersistedSortOrderRef = useRef('')
-  const pendingPersistedSortOrderRef = useRef('')
   useEffect(() => {
-    if (sortBy !== 'smart' || sortedIds.length === 0) {
-      lastPersistedSortOrderRef.current = ''
-      pendingPersistedSortOrderRef.current = ''
-      return
-    }
-    if (!sessionHasHadLiveSmartSignal.current) {
-      return
-    }
-    const orderKey = sortedIds.join('\n')
-    if (
-      orderKey === lastPersistedSortOrderRef.current ||
-      orderKey === pendingPersistedSortOrderRef.current
-    ) {
+    if (sortBy !== 'smart' || sortedIds.length === 0 || !sessionHasHadLiveSmartSignal.current) {
       return
     }
     // Why: sortOrder lives in each host's worktreeMeta, so persist each host's ids on that host.
     const state = useAppStore.getState()
-    pendingPersistedSortOrderRef.current = orderKey
-    void persistWorktreeSortOrderByHost(state, sortedIds).then((successful) => {
-      if (successful) {
-        lastPersistedSortOrderRef.current = orderKey
-      }
-      if (pendingPersistedSortOrderRef.current === orderKey) {
-        pendingPersistedSortOrderRef.current = ''
-      }
-    })
+    persistWorktreeSortOrderByHost(state, sortedIds)
   }, [sortedIds, sortBy])
 
   // Flatten/filter/sort via the shared utility so card order matches Cmd+1–9 numbering.
