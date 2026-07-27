@@ -15,6 +15,10 @@ vi.mock('react-native', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
 }))
+vi.mock('../localization/mobile-locale-provider', async () => {
+  const { english } = await import('../localization/catalogs/en')
+  return { useMobileLocale: () => ({ t: (key: keyof typeof english) => english[key] }) }
+})
 
 vi.mock('../localization/mobile-locale-provider', () => ({
   useMobileLocale: () => ({ t: (key: string) => key })
