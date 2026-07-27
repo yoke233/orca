@@ -217,6 +217,19 @@ const interactiveOutputCharsByPty = new Map<string, number>()
 const activeRendererPtys = new Set<string>()
 const visibleRendererPtys = new Set<string>()
 const rendererVisibilityKnownPtys = new Set<string>()
+
+// Why: hidden is an optimization hint; direct visible/active evidence must win so stale claims cannot drop foreground bytes.
+function shouldDropHiddenRendererPtyDataForCurrentView(
+  id: string,
+  settings: GlobalSettings | null | undefined
+): boolean {
+  return (
+    !activeRendererPtys.has(id) &&
+    !visibleRendererPtys.has(id) &&
+    shouldDropHiddenRendererPtyData(id, settings)
+  )
+}
+
 let invalidatePendingPtyDrainPriority = (_id?: string, _schedule?: boolean): void => {}
 let invalidatePendingPtyDrainPolicy = (_id?: string, _schedule?: boolean): void => {}
 const pendingHiddenRendererResizeOutputPtys = new Set<string>()
@@ -1750,7 +1763,7 @@ export function registerPtyHandlers(
     (id) => {
       const runnableLane = activeRendererPtys.has(id) ? 'active' : 'background'
       // Why first: hidden bytes are dropped from main's pending queue even when renderer credit is exhausted.
-      if (shouldDropHiddenRendererPtyData(id, getSettings?.())) {
+      if (shouldDropHiddenRendererPtyDataForCurrentView(id, getSettings?.())) {
         return runnableLane
       }
       if (
@@ -1769,14 +1782,14 @@ export function registerPtyHandlers(
 
   function transitionHiddenRendererPtyDeliveryState(id: string, hidden: boolean) {
     const settings = getSettings?.()
-    const wasDroppable = shouldDropHiddenRendererPtyData(id, settings)
+    const wasDroppable = shouldDropHiddenRendererPtyDataForCurrentView(id, settings)
     let droppedWhileHidden = false
     if (hidden) {
       markHiddenRendererPty(id)
     } else {
       droppedWhileHidden = unmarkHiddenRendererPty(id).droppedWhileHidden
     }
-    const droppable = shouldDropHiddenRendererPtyData(id, settings)
+    const droppable = shouldDropHiddenRendererPtyDataForCurrentView(id, settings)
     return { droppable, droppedWhileHidden, policyChanged: wasDroppable !== droppable }
   }
 
@@ -2025,31 +2038,6 @@ export function registerPtyHandlers(
       perPty: perPty.slice(0, DELIVERY_DIAGNOSTICS_MAX_PTYS),
       breadcrumbs: mainDeliveryBreadcrumbs.snapshot()
     }
-  }
-
-  // Why rate-limited: the contradiction persists chunk after chunk while latched; one line per minute keeps field logs readable but present.
-  let lastHiddenDropContradictionWarnAtMs = 0
-  function warnIfDroppingHiddenBytesForVisiblePty(id: string, droppedChars: number): void {
-    if (!visibleRendererPtys.has(id) && !activeRendererPtys.has(id)) {
-      return
-    }
-    // Recorded before the warn rate limit: the ring coalesces repeats, and the contradiction must appear in the freeze report either way.
-    mainDeliveryBreadcrumbs.record('hidden-drop-visible', {
-      id: redactPtyIdForDiagnostics(id),
-      droppedChars
-    })
-    const now = Date.now()
-    if (now - lastHiddenDropContradictionWarnAtMs < 60_000) {
-      return
-    }
-    lastHiddenDropContradictionWarnAtMs = now
-    console.warn('[pty] hidden-delivery gate is dropping bytes for a visible/active pty', {
-      id,
-      droppedChars,
-      visible: visibleRendererPtys.has(id),
-      active: activeRendererPtys.has(id),
-      ...readCurrentPtyRendererDeliveryDebugSnapshot()
-    })
   }
 
   function seedPtyRendererDeliveryPeaksFromCurrentState(): void {
@@ -2543,12 +2531,11 @@ export function registerPtyHandlers(
         }
         const { id, pending } = selection
         // Why drop, never re-queue: the model already ingested hidden-gated bytes; reveal restores from the snapshot+seq machinery.
-        if (shouldDropHiddenRendererPtyData(id, settings)) {
+        if (shouldDropHiddenRendererPtyDataForCurrentView(id, settings)) {
           pendingData.remove(selection)
           pendingOverflowMarkedPtys.delete(id)
           updateProducerFlowControl(id)
           const drop = recordHiddenRendererPtyDataDrop(id, pending.data.length)
-          warnIfDroppingHiddenBytesForVisiblePty(id, pending.data.length)
           if (drop.shouldEmitRestoreMarker) {
             sendModelRestoreNeededMarker(id, 'hidden-drop', runtime?.getPtyOutputSequence(id))
           }
@@ -2837,9 +2824,8 @@ export function registerPtyHandlers(
       }
       const settings = getSettings?.()
       // Why drop before the interactive bypass: runtime already ingested the chunk, so gated PTYs skip both renderer paths and reveal restores from the snapshot.
-      if (shouldDropHiddenRendererPtyData(payload.id, settings)) {
+      if (shouldDropHiddenRendererPtyDataForCurrentView(payload.id, settings)) {
         const drop = recordHiddenRendererPtyDataDrop(payload.id, payload.data.length)
-        warnIfDroppingHiddenBytesForVisiblePty(payload.id, payload.data.length)
         if (drop.shouldEmitRestoreMarker) {
           sendModelRestoreNeededMarker(payload.id, 'hidden-drop', outputSeq)
         }
@@ -5354,7 +5340,9 @@ export function registerPtyHandlers(
     if (typeof args.id !== 'string' || !args.id) {
       return
     }
-    // Why: renderer scheduling hint only — active panes just get first chance at the bounded output reserve; reads/state/notifications continue for inactive terminals.
+    const settings = getSettings?.()
+    const wasDroppable = shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)
+    // Why: active panes get first drain priority and must override stale hidden claims while the user is interacting with them.
     if (args.active) {
       if (activeRendererPtys.has(args.id)) {
         return
@@ -5362,6 +5350,9 @@ export function registerPtyHandlers(
       activeRendererPtys.add(args.id)
     } else if (!activeRendererPtys.delete(args.id)) {
       return
+    }
+    if (wasDroppable !== shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)) {
+      invalidatePendingPtyDrainPolicy(args.id)
     }
     invalidatePendingPtyDrainPriority(args.id)
   })
@@ -5371,6 +5362,8 @@ export function registerPtyHandlers(
     if (typeof args.id !== 'string' || !args.id) {
       return
     }
+    const settings = getSettings?.()
+    const wasDroppable = shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)
     // Why: data produced while no renderer can see this PTY must keep that origin through batching, even if the user switches back before the flush lands.
     rendererVisibilityKnownPtys.add(args.id)
     if (args.visible) {
@@ -5378,6 +5371,9 @@ export function registerPtyHandlers(
       closeStartupQueryAuthorityForPty(args.id)
     } else {
       visibleRendererPtys.delete(args.id)
+    }
+    if (wasDroppable !== shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)) {
+      invalidatePendingPtyDrainPolicy(args.id)
     }
     syncPtyBackgroundedDelivery(args.id, 'visibility-report')
   })
@@ -5440,9 +5436,9 @@ export function registerPtyHandlers(
     }
     // Why: any delivery interest suppresses the hidden-delivery gate (raw-byte consumers keep receiving while hidden); not synced to the daemon pacer so interest churn can't un-pace a flood.
     const settings = getSettings?.()
-    const wasDroppable = shouldDropHiddenRendererPtyData(args.id, settings)
+    const wasDroppable = shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)
     setRendererPtyDeliveryInterest(args.id, args.interested === true)
-    if (wasDroppable !== shouldDropHiddenRendererPtyData(args.id, settings)) {
+    if (wasDroppable !== shouldDropHiddenRendererPtyDataForCurrentView(args.id, settings)) {
       invalidatePendingPtyDrainPolicy(args.id)
     }
   })
