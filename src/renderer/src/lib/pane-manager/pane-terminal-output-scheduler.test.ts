@@ -95,7 +95,7 @@ describe('pane terminal output scheduler', () => {
       })
       expect(credit.count()).toBe(0)
 
-      vi.advanceTimersByTime(16)
+      vi.advanceTimersByTime(0)
       expect(terminal.write).toHaveBeenCalledWith('queued', expect.any(Function))
       expect(credit.count()).toBe(0)
       parsed?.()
@@ -141,7 +141,7 @@ describe('pane terminal output scheduler', () => {
         ackCredit: credit.fire,
         onParsed
       })
-      vi.advanceTimersByTime(16)
+      vi.advanceTimersByTime(0)
 
       expect(parseCallbacks).toHaveLength(3)
       parseCallbacks[0]()
@@ -389,7 +389,7 @@ describe('pane terminal output scheduler', () => {
       onParsed
     })
 
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
 
     expect(terminal.write).toHaveBeenCalledWith('queued', expect.any(Function))
     expect(onParsed).not.toHaveBeenCalled()
@@ -699,7 +699,7 @@ describe('pane terminal output scheduler', () => {
     })
 
     expect(terminal.write).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
 
     expect(terminal.write).toHaveBeenCalledTimes(2)
     expect(terminal.write.mock.calls.map(([data]) => data).join('')).toBe(
@@ -1222,7 +1222,7 @@ describe('pane terminal output scheduler', () => {
       latencySensitive: false
     })
 
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
 
     expect(active.write).toHaveBeenCalledWith('active', expect.any(Function))
     expect(active.write.mock.invocationCallOrder[0]).toBeLessThan(

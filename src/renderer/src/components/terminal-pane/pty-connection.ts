@@ -5674,13 +5674,13 @@ export function connectPanePty(
       recordTerminalOutput(pane.terminal)
     }
 
-    function consumeForegroundImmediateBudget(dataLength: number, maxChars: number): boolean {
+    function consumeForegroundImmediateBudget(dataLength: number): boolean {
       const now = performance.now()
       if (now - foregroundImmediateBudgetWindowStart > FOREGROUND_BUDGET_WINDOW_MS) {
         foregroundImmediateBudgetChars = 0
         foregroundImmediateBudgetWindowStart = now
       }
-      if (foregroundImmediateBudgetChars + dataLength > maxChars) {
+      if (foregroundImmediateBudgetChars + dataLength > FOREGROUND_IMMEDIATE_BUDGET_CHARS) {
         return false
       }
       foregroundImmediateBudgetChars += dataLength
@@ -5703,22 +5703,17 @@ export function connectPanePty(
         }
         return consumeInactiveForegroundImmediateBudget(data.length)
       }
+      if (data.length <= FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS) {
+        return consumeForegroundImmediateBudget(data.length)
+      }
       const recentInput =
         performance.now() - lastTerminalInputAt <= FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
-      if (data.length <= FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS) {
-        return consumeForegroundImmediateBudget(
-          data.length,
-          recentInput
-            ? FOREGROUND_IMMEDIATE_BUDGET_CHARS
-            : INACTIVE_FOREGROUND_IMMEDIATE_BUDGET_CHARS
-        )
-      }
       if (
         recentInput &&
         data.length <= FOREGROUND_INTERACTIVE_REDRAW_CHARS &&
         data.includes('\x1b[')
       ) {
-        return consumeForegroundImmediateBudget(data.length, FOREGROUND_IMMEDIATE_BUDGET_CHARS)
+        return consumeForegroundImmediateBudget(data.length)
       }
       return false
     }

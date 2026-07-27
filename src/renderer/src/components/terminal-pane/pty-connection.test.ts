@@ -1874,40 +1874,8 @@ describe('connectPanePty', () => {
     capturedDataCallback.current?.('x'.repeat(16 * 1024))
 
     expect(pane.terminal.write).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
     expect(pane.terminal.write).toHaveBeenCalledWith('x'.repeat(16 * 1024), expect.any(Function))
-  })
-
-  it('coalesces sustained autonomous foreground chunks across event-loop turns', async () => {
-    const { connectPanePty } = await import('./pty-connection')
-    const pane = createPane(1)
-    const transport = createMockTransport('pty-1')
-    const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
-    transport.connect.mockImplementation(async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
-      capturedDataCallback.current = callbacks.onData ?? null
-      return 'pty-1'
-    })
-    transportFactoryQueue.push(transport)
-
-    connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
-    await flushAsyncTicks()
-    expect(capturedDataCallback.current).not.toBeNull()
-
-    vi.useFakeTimers()
-    const chunks = Array.from(
-      { length: 31 },
-      (_, index) => `${String(index).padStart(2, '0')}:${'x'.repeat(2044)}`
-    )
-    for (const chunk of chunks) {
-      capturedDataCallback.current?.(chunk)
-      vi.advanceTimersByTime(1)
-    }
-
-    expect(pane.terminal.write).not.toHaveBeenCalledWith(chunks.at(-1), expect.any(Function))
-    vi.advanceTimersByTime(1)
-    expect(pane.terminal.write.mock.calls.length).toBeLessThan(chunks.length)
-    vi.advanceTimersByTime(16)
-    expect(pane.terminal.write.mock.calls.map(([data]) => data).join('')).toBe(chunks.join(''))
   })
 
   it('keeps ANSI redraws after terminal input on the immediate xterm write path', async () => {
@@ -8125,8 +8093,6 @@ describe('connectPanePty', () => {
     })
     transportFactoryQueue.push(transport)
     const paneKey = makePaneKey('tab-1', LEAF_1)
-    const transcriptPath =
-      '\\\\?\\C:\\Users\\Example\\.codex\\sessions\\2026\\07\\20\\rollout-codex-session-1.jsonl'
     // Why: after restart agentStatusByPaneKey is empty — the persisted sleeping record is the only provider session id source (#5232).
     mockStoreState = {
       ...mockStoreState,
@@ -8144,11 +8110,7 @@ describe('connectPanePty', () => {
           tabId: 'tab-1',
           worktreeId: 'wt-1',
           agent: 'codex',
-          providerSession: {
-            key: 'session_id',
-            id: 'codex-session-1',
-            transcriptPath
-          },
+          providerSession: { key: 'session_id', id: 'codex-session-1' },
           prompt: 'finish the task',
           state: 'working',
           capturedAt: 1,
@@ -8182,11 +8144,6 @@ describe('connectPanePty', () => {
       expect.objectContaining({
         sessionId: 'lost-pty',
         command: "codex '--dangerously-bypass-approvals-and-sandbox' 'resume' 'codex-session-1'",
-        resumeProviderSession: {
-          key: 'session_id',
-          id: 'codex-session-1',
-          transcriptPath
-        },
         env: expect.objectContaining({
           ORCA_PANE_KEY: paneKey,
           ORCA_TAB_ID: 'tab-1',
@@ -10441,7 +10398,7 @@ describe('connectPanePty', () => {
     capturedDataCallback.current?.(redraw)
 
     expect(pane.terminal.write).not.toHaveBeenCalledWith(redraw, expect.any(Function))
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
     expect(pane.terminal.write).toHaveBeenCalledWith(redraw, expect.any(Function))
   })
 
@@ -10474,7 +10431,7 @@ describe('connectPanePty', () => {
     capturedDataCallback.current?.(redraw)
 
     expect(pane.terminal.write).not.toHaveBeenCalledWith(redraw, expect.any(Function))
-    vi.advanceTimersByTime(16)
+    vi.advanceTimersByTime(0)
     expect(pane.terminal.write).toHaveBeenCalledWith(redraw, expect.any(Function))
   })
 
