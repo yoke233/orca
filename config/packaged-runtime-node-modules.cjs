@@ -205,6 +205,10 @@ function findAsarEntry(entries, expectedPath) {
   return entries.find((entry) => normalizeAsarEntryPath(entry) === expectedPath)
 }
 
+function escapeRegExpLiteral(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function verifyPackagedMainRelativeExports(asarPath, entries, asar) {
   const sourceByPath = new Map()
   const readSource = (file) => {
@@ -230,12 +234,18 @@ function verifyPackagedMainRelativeExports(asarPath, entries, asar) {
     const requiredPath = posix.normalize(posix.join(posix.dirname(mainFile), specifier))
     const requiredSource = readSource(requiredPath)
     const missing = new Set()
-    const memberPattern = new RegExp(`\\b${namespace}\\.([A-Za-z_$][\\w$]*)`, 'g')
+    const memberPattern = new RegExp(
+      `\\b${escapeRegExpLiteral(namespace)}\\.([A-Za-z_$][\\w$]*)`,
+      'g'
+    )
     for (const memberMatch of mainSource.matchAll(memberPattern)) {
       const member = memberMatch[1]
+      const escapedMember = escapeRegExpLiteral(member)
       const exported =
-        new RegExp(`\\bexports\\.${member}\\s*=`).test(requiredSource) ||
-        new RegExp(`Object\\.defineProperty\\(exports,\\s*["']${member}["']`).test(requiredSource)
+        new RegExp(`\\bexports\\.${escapedMember}\\s*=`).test(requiredSource) ||
+        new RegExp(
+          `Object\\.defineProperty\\(exports,\\s*["']${escapedMember}["']`
+        ).test(requiredSource)
       if (!exported) {
         missing.add(member)
       }

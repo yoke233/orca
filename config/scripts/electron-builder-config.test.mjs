@@ -265,6 +265,26 @@ describe('electron-builder config', () => {
     expect(isPackagedExternalSpecifier('yaml')).toBe(true)
   })
 
+  it('accepts Rolldown export aliases containing regex metacharacters', () => {
+    const sources = new Map([
+      [
+        'out/main/index.js',
+        'const require_session = require("./chunks/session.js"); require_session.getShellReadyLaunchConfig$1()'
+      ],
+      [
+        'out/main/chunks/session.js',
+        'Object.defineProperty(exports, "getShellReadyLaunchConfig$1", { get: function() {} })'
+      ]
+    ])
+    const asar = {
+      extractFile: (_asarPath, internalPath) => Buffer.from(sources.get(internalPath), 'utf8')
+    }
+
+    expect(() =>
+      verifyPackagedMainRelativeExports('app.asar', [...sources.keys()], asar)
+    ).not.toThrow()
+  })
+
   it('rejects packaged main calls missing from a relative runtime entry', () => {
     const sources = new Map([
       [
