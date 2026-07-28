@@ -146,6 +146,7 @@ afterAll(() => {
 describe.skipIf(process.platform !== 'win32')(
   'Electron workspace ASAR filesystem lock regression',
   () => {
+    /** @type {Array<[string, Record<string, unknown>, Record<string, unknown>]>} */
     const cases = [
       ['stat', { isFile: false, isDirectory: true }, { isFile: true, isDirectory: false }],
       ['readdir', { code: null }, { code: 'ENOTDIR' }],
