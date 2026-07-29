@@ -2,29 +2,10 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import { assistantTextMessage, userTextMessage } from './mobile-native-chat-message-test-fixtures'
 import { useMobileNativeChatDrafts } from './use-mobile-native-chat-drafts'
 
 type DraftState = ReturnType<typeof useMobileNativeChatDrafts>
-
-function userTextMessage(id: string, text: string): NativeChatMessage {
-  return {
-    id,
-    role: 'user',
-    blocks: [{ type: 'text', text }],
-    timestamp: null,
-    source: 'transcript'
-  }
-}
-
-function assistantTextMessage(id: string, text: string): NativeChatMessage {
-  return {
-    id,
-    role: 'assistant',
-    blocks: [{ type: 'text', text }],
-    timestamp: null,
-    source: 'transcript'
-  }
-}
 
 describe('useMobileNativeChatDrafts', () => {
   let renderer: ReactTestRenderer | null = null
@@ -99,7 +80,6 @@ describe('useMobileNativeChatDrafts', () => {
         state?.clearDraftForSend(originA, 'from a')
       }
     })
-
     await switchTo('b')
     act(() => state?.setComposerText('from b'))
     act(() => {
@@ -175,7 +155,6 @@ describe('useMobileNativeChatDrafts', () => {
       }
     })
     expect(state?.composerText).toBe('')
-
     await switchTo('a')
     expect(state?.composerText).toBe('from a')
   })
@@ -193,7 +172,6 @@ describe('useMobileNativeChatDrafts', () => {
         }
       })
       expect(state?.composerText).toBe('')
-
       // A relay drop can stall the transcript stream past the deadline; the
       // delivered prompt must not reappear in the composer when it recovers.
       act(() => vi.advanceTimersByTime(25_000))
@@ -218,7 +196,6 @@ describe('useMobileNativeChatDrafts', () => {
       }
     })
     expect(state?.pending.map((pending) => pending.text)).toEqual(['ping', 'ping'])
-
     await act(async () =>
       renderer?.update(
         createElement(Harness, { tabId: 'a', messages: [userTextMessage('m1', 'ping')] })
@@ -242,7 +219,6 @@ describe('useMobileNativeChatDrafts', () => {
     })
     // The echo carries the preview thumbnail and has no text to match against.
     expect(state?.pending.map((pending) => pending.images)).toEqual([['file:///a.jpg']])
-
     // An agent reply grows the transcript but must NOT clear the photo echo early.
     await act(async () =>
       renderer?.update(
@@ -253,7 +229,6 @@ describe('useMobileNativeChatDrafts', () => {
       )
     )
     expect(state?.pending.map((pending) => pending.images)).toEqual([['file:///a.jpg']])
-
     // The user's own image echo landing (Claude records it as an
     // `[Image: source: …]` turn) clears it.
     await act(async () =>
@@ -287,7 +262,6 @@ describe('useMobileNativeChatDrafts', () => {
       }
     })
     expect(state?.pending).toHaveLength(2)
-
     // The text echo lands first: it must clear only the text pending — a user
     // turn that is not an image echo cannot reconcile the photo.
     await act(async () =>
@@ -299,7 +273,6 @@ describe('useMobileNativeChatDrafts', () => {
       )
     )
     expect(state?.pending.map((pending) => pending.images)).toEqual([['file:///a.jpg']])
-
     await act(async () =>
       renderer?.update(
         createElement(Harness, {
@@ -329,7 +302,6 @@ describe('useMobileNativeChatDrafts', () => {
       }
     })
     expect(state?.pending).toHaveLength(1)
-
     // Claude echoes a captioned image send as two turns: the source marker and
     // the caption prefixed with `[Image #1] ` — the pending must still match.
     await act(async () =>
@@ -355,7 +327,6 @@ describe('useMobileNativeChatDrafts', () => {
         state?.acceptSend(origin, '', ['file:///a.jpg', 'file:///b.jpg'])
       }
     })
-
     await act(async () =>
       renderer?.update(
         createElement(Harness, {

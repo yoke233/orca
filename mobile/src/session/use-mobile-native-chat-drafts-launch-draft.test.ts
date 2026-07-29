@@ -2,19 +2,10 @@ import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import { userTextMessage } from './mobile-native-chat-message-test-fixtures'
 import { useMobileNativeChatDrafts } from './use-mobile-native-chat-drafts'
 
 type DraftState = ReturnType<typeof useMobileNativeChatDrafts>
-
-function userTextMessage(id: string, text: string): NativeChatMessage {
-  return {
-    id,
-    role: 'user',
-    blocks: [{ type: 'text', text }],
-    timestamp: null,
-    source: 'transcript'
-  }
-}
 
 // Adoption and retirement of the host-published launch draft (the TUI-input
 // prefill mirrored into the chat composer). Split from the send/pending suite
