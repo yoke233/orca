@@ -109,6 +109,9 @@ export function useMobileNativeChatMessageSend(args: {
           client,
           terminal,
           text,
+          // Why: text sends must clear a parked launch draft, while image sends
+          // already cleared before pasting and would lose the image if cleared again.
+          clearInputFirst: !images?.length,
           deadline,
           ...(deviceTokenRef.current
             ? { mobileClient: { id: deviceTokenRef.current, type: 'mobile' } }
