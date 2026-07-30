@@ -3,6 +3,7 @@ import { combineUnsubscribes } from './combine-unsubscribes'
 import type {
   IPtyProvider,
   PtyBackgroundStreamEvent,
+  PtyDataEvent,
   PtyProviderBufferSnapshot,
   PtyProcessInfo,
   PtySpawnOptions,
@@ -18,13 +19,7 @@ export class DaemonPtyRouter implements IPtyProvider {
   private legacy: DaemonPtyAdapter[]
   private sessionAdapters = new Map<string, DaemonPtyAdapter>()
   private unsubscribers: (() => void)[] = []
-  private dataListeners: ((payload: {
-    id: string
-    data: string
-    sequenceChars?: number
-    transformed?: boolean
-    seq?: number
-  }) => void)[] = []
+  private dataListeners: ((payload: PtyDataEvent) => void)[] = []
   private exitListeners: ((payload: {
     id: string
     code: number
@@ -231,15 +226,7 @@ export class DaemonPtyRouter implements IPtyProvider {
     return this.current.getProfiles()
   }
 
-  onData(
-    callback: (payload: {
-      id: string
-      data: string
-      sequenceChars?: number
-      transformed?: boolean
-      seq?: number
-    }) => void
-  ): () => void {
+  onData(callback: (payload: PtyDataEvent) => void): () => void {
     this.dataListeners.push(callback)
     return () => {
       const idx = this.dataListeners.indexOf(callback)
