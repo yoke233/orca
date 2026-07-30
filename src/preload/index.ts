@@ -13,6 +13,7 @@ import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { CodexConfigSyncStatus } from '../shared/codex-config-sync-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
+import type { TerminalTabCreateReply } from '../shared/terminal-reveal-identity'
 import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type { StartupCommandDelivery } from '../shared/codex-startup-delivery'
 import type {
@@ -487,6 +488,8 @@ const api = {
     },
     awaitFirstWindowStartupServices: (): Promise<void> =>
       ipcRenderer.invoke('app:awaitFirstWindowStartupServices'),
+    recoverLegacyWorkerTerminalsForRendererStartup: (): Promise<void> =>
+      ipcRenderer.invoke('app:recoverLegacyWorkerTerminalsForRendererStartup'),
     startupDiagnostic: (event: string, details?: Record<string, unknown>): Promise<void> =>
       startupDiagnosticsEnabled
         ? ipcRenderer.invoke('app:startupDiagnostic', event, details)
@@ -3696,6 +3699,7 @@ const api = {
         title?: string
         ptyId?: string
         activate?: boolean
+        focus?: boolean
         presentation?: RuntimeTerminalPresentation
         tabId?: string
         leafId?: string
@@ -3720,6 +3724,7 @@ const api = {
           title?: string
           ptyId?: string
           activate?: boolean
+          focus?: boolean
           presentation?: RuntimeTerminalPresentation
           tabId?: string
           leafId?: string
@@ -3751,12 +3756,7 @@ const api = {
       ipcRenderer.on('terminal:requestTabMount', listener)
       return () => ipcRenderer.removeListener('terminal:requestTabMount', listener)
     },
-    replyTerminalCreate: (reply: {
-      requestId: string
-      tabId?: string
-      title?: string
-      error?: string
-    }): void => {
+    replyTerminalCreate: (reply: TerminalTabCreateReply): void => {
       ipcRenderer.send('terminal:tabCreateReply', reply)
     },
     onSplitTerminal: (
@@ -3947,6 +3947,8 @@ const api = {
     }): Promise<string | null> => ipcRenderer.invoke('clipboard:saveImageAsTempFile', args),
     writeClipboardText: (text: string): Promise<void> =>
       ipcRenderer.invoke('clipboard:writeText', text),
+    writeTerminalClipboardText: (text: string): Promise<void> =>
+      ipcRenderer.invoke('clipboard:writeTerminalText', text),
     writeSelectionClipboardText: (text: string): Promise<void> =>
       ipcRenderer.invoke('clipboard:writeSelectionText', text),
     writeClipboardImage: (dataUrl: string): Promise<void> =>
@@ -4643,6 +4645,24 @@ const api = {
         callback(data)
       ipcRenderer.on('agentStatus:migrationUnsupportedClear', listener)
       return () => ipcRenderer.removeListener('agentStatus:migrationUnsupportedClear', listener)
+    },
+    onLegacyWorkerTerminalRecovery: (
+      callback: (data: {
+        paneKey: string
+        resolution: 'adopted' | 'exited' | 'rolled_back'
+        ptyId?: string
+      }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: {
+          paneKey: string
+          resolution: 'adopted' | 'exited' | 'rolled_back'
+          ptyId?: string
+        }
+      ) => callback(data)
+      ipcRenderer.on('agentStatus:legacyWorkerTerminalRecovery', listener)
+      return () => ipcRenderer.removeListener('agentStatus:legacyWorkerTerminalRecovery', listener)
     },
     getMigrationUnsupportedSnapshot: (): Promise<MigrationUnsupportedPtyEntry[]> =>
       ipcRenderer.invoke('agentStatus:getMigrationUnsupportedSnapshot'),

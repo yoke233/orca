@@ -163,6 +163,7 @@ export type ProjectHostSetup = {
 
 export type ProjectHostSetupExistingFolderArgs = {
   projectId: string
+  projectProviderIdentity?: ProjectProviderIdentity
   hostId: ExecutionHostId
   path: string
   kind?: RepoKind
@@ -185,6 +186,7 @@ export type ProjectHostSetupCreateArgs = {
 
 export type ProjectHostSetupCloneArgs = {
   projectId: string
+  projectProviderIdentity?: ProjectProviderIdentity
   hostId: ExecutionHostId
   url: string
   destination: string
@@ -2155,6 +2157,7 @@ export type WorktreeStartupLaunch = {
   launchConfig?: SleepingAgentLaunchConfig
   launchToken?: string
   launchAgent?: TuiAgent
+  viewMode?: 'terminal' | 'chat'
   startupCommandDelivery?: StartupCommandDelivery
   telemetry?: { agent_kind: AgentKind; launch_source: LaunchSource; request_kind: RequestKind }
 }
@@ -2788,6 +2791,8 @@ export type GlobalSettings = {
   localhostWorktreeLabelsEnabled?: boolean
   /** Tracks the one-time first-use prompt for terminal link routing (avoid silently changing where links open). */
   openLinksInAppPreferencePrompted: boolean
+  /** Opt-in: Shift+modifier click inverts openLinksInApp instead of always forcing the system browser. Off keeps the historical one-way escape hatch. */
+  openLinksInAppModifierInverts?: boolean
   /** Opt-in: open new coding-agent tabs in native chat instead of the raw terminal; optional for legacy settings. */
   openAgentTabsInChatByDefault?: boolean
   /** Experimental native chat surface for Claude/Codex sessions; off by default. */

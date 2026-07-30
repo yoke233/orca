@@ -7,12 +7,22 @@ import type { ActivityTerminalPortalTarget } from '../activity/activity-terminal
 import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { shouldDeferParkedPtyExitTabClose } from './terminal-parked-tab-watchers'
-import {
-  FALLBACK_RECT_MIN_CHANGE_PX,
-  MIN_OVERLAY_FIT_HEIGHT_PX,
-  MIN_OVERLAY_FIT_WIDTH_PX,
-  shouldUseCssAnchorPositioning
-} from './terminal-overlay-positioning'
+
+const HAS_CSS_ANCHOR_POSITIONING =
+  typeof CSS !== 'undefined' &&
+  CSS.supports('position-anchor', '--orca-terminal-overlay-probe') &&
+  CSS.supports('top', 'anchor(--orca-terminal-overlay-probe top)') &&
+  CSS.supports('width', 'anchor-size(--orca-terminal-overlay-probe width)')
+const MIN_OVERLAY_FIT_WIDTH_PX = 48
+const MIN_OVERLAY_FIT_HEIGHT_PX = 24
+const FALLBACK_RECT_MIN_CHANGE_PX = 1
+
+function shouldUseCssAnchorPositioning(): boolean {
+  return (
+    HAS_CSS_ANCHOR_POSITIONING &&
+    (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ !== true
+  )
+}
 
 type MeasuredFallbackRect = {
   top: number
@@ -29,15 +39,12 @@ type TerminalOverlaySlotProps = {
   startupCwd: string | undefined
   groupId: string | undefined
   isWorktreeActive: boolean
-  isWorktreePresented: boolean
   isVisible: boolean
-  isPresented: boolean
   isActive: boolean
   activityTerminalPortal: ActivityTerminalPortalTarget | null
   onFocusOwningGroup: ((groupId: string) => void) | undefined
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   leaveWorktreeIfEmpty: () => void
-  onInitialRenderSettled?: () => void
 }
 
 export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
@@ -48,15 +55,12 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
   startupCwd,
   groupId,
   isWorktreeActive,
-  isWorktreePresented,
   isVisible,
-  isPresented,
   isActive,
   activityTerminalPortal,
   onFocusOwningGroup,
   consumeSuppressedPtyExit,
-  leaveWorktreeIfEmpty,
-  onInitialRenderSettled
+  leaveWorktreeIfEmpty
 }: TerminalOverlaySlotProps): React.JSX.Element {
   const anchorName = groupId !== undefined ? tabGroupBodyAnchorName(groupId) : undefined
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -165,8 +169,6 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
     }
   }, [anchorName, isVisible, measuredFallbackRect])
 
-  const showPresentedTerminal = isPresented && (isWorktreeActive || isWorktreePresented)
-  const isInteractive = isVisible && isPresented && isWorktreePresented
   const style: React.CSSProperties = useMemo(
     () =>
       anchorName && shouldUseCssAnchorPositioning()
@@ -177,10 +179,9 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
             left: `anchor(${anchorName} left)`,
             width: `anchor-size(${anchorName} width)`,
             height: `anchor-size(${anchorName} height)`,
-            display:
-              isVisible || showPresentedTerminal || shouldMeasureHiddenStartup ? 'flex' : 'none',
-            opacity: showPresentedTerminal ? 1 : 0,
-            pointerEvents: isInteractive ? 'auto' : 'none'
+            display: isVisible || shouldMeasureHiddenStartup ? 'flex' : 'none',
+            opacity: isVisible ? 1 : 0,
+            pointerEvents: isVisible ? 'auto' : 'none'
           }
         : anchorName
           ? {
@@ -192,10 +193,9 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
               left: measuredFallbackRect?.left ?? 0,
               width: measuredFallbackRect?.width ?? '100%',
               height: measuredFallbackRect?.height ?? 'calc(100% - 32px)',
-              display:
-                isVisible || showPresentedTerminal || shouldMeasureHiddenStartup ? 'flex' : 'none',
-              opacity: showPresentedTerminal ? 1 : 0,
-              pointerEvents: isInteractive ? 'auto' : 'none'
+              display: isVisible || shouldMeasureHiddenStartup ? 'flex' : 'none',
+              opacity: isVisible ? 1 : 0,
+              pointerEvents: isVisible ? 'auto' : 'none'
             }
           : {
               position: 'absolute',
@@ -206,14 +206,7 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
               display: 'none',
               pointerEvents: 'none'
             },
-    [
-      anchorName,
-      isInteractive,
-      isVisible,
-      measuredFallbackRect,
-      shouldMeasureHiddenStartup,
-      showPresentedTerminal
-    ]
+    [anchorName, isVisible, measuredFallbackRect, shouldMeasureHiddenStartup]
   )
   const focusGroup = useCallback(() => {
     if (groupId !== undefined && onFocusOwningGroup) {
@@ -227,14 +220,12 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       tabId={terminalTabId}
       worktreeId={worktreeId}
       cwd={startupCwd ?? worktreePath}
-      isActive={
-        (isActive && isPresented && isWorktreePresented) || activityTerminalPortal?.active === true
-      }
+      isActive={isActive || activityTerminalPortal?.active === true}
       // Why: split-group changes reparent TabGroupPanel subtrees. Keeping the
       // TerminalPane mounted here preserves alt-screen TUI state while this
       // flag still lets hidden tabs throttle rendering.
-      isVisible={isVisible || showPresentedTerminal || activityTerminalPortal !== null}
-      isWorktreeActive={isWorktreeActive || isWorktreePresented || activityTerminalPortal !== null}
+      isVisible={isVisible || activityTerminalPortal !== null}
+      isWorktreeActive={isWorktreeActive || activityTerminalPortal !== null}
       isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
       onPtyExit={(ptyId) => {
         if (consumeSuppressedPtyExit(ptyId)) {
@@ -258,7 +249,6 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
         // store.closeTab was the path that closed pinned terminals silently.
         closeTerminalTab(terminalTabId, { onClosed: leaveWorktreeIfEmpty })
       }}
-      onInitialRenderSettled={onInitialRenderSettled}
     />
   )
 
@@ -275,9 +265,6 @@ export const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       ref={overlayRef}
       style={style}
       data-terminal-overlay-tab-id={terminalTabId}
-      data-terminal-overlay-presented={showPresentedTerminal ? 'true' : 'false'}
-      inert={!isInteractive}
-      aria-hidden={!isInteractive}
       onPointerDown={focusGroup}
       onFocusCapture={focusGroup}
     >

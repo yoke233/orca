@@ -8,10 +8,14 @@ import {
 } from '../activity/activity-terminal-portal'
 import { shouldMountBackgroundWorktreeTab } from '../terminal/background-terminal-worktree-mount'
 import { useNativeChatToggleShortcut } from '../native-chat/use-native-chat-toggle-shortcut'
-import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
-import { useTerminalOverlayPresentation } from './use-terminal-overlay-presentation'
-import { buildTerminalOverlayAssignments } from './terminal-overlay-assignments'
 import { TerminalOverlaySlot } from './TerminalOverlaySlot'
+import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
+
+type TerminalOverlayAssignment = {
+  unifiedTabId: string
+  groupId: string
+  isActiveInGroup: boolean
+}
 
 const EMPTY_TERMINAL_TABS: readonly TerminalTab[] = []
 const EMPTY_UNIFIED_TABS: readonly Tab[] = []
@@ -22,31 +26,25 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   worktreeId,
   worktreePath,
   isWorktreeActive,
-  isWorktreePresented = isWorktreeActive,
   coldParkTerminalPanes = false,
   isForceParked = false,
   shouldMeasureHiddenWorktree = false,
   activityTerminalPortals = EMPTY_ACTIVITY_PORTALS,
   backgroundMountTabIds = null,
-  activationDeferredMountTabIds = null,
-  onInitialTerminalRenderSettled
+  activationDeferredMountTabIds = null
 }: {
   worktreeId: string
   worktreePath: string
   isWorktreeActive: boolean
-  isWorktreePresented?: boolean
   coldParkTerminalPanes?: boolean
-  /** Retention-budget force-park (C1 slice B): eviction-exempt tabs keep their mounted panes. */
+  /** Retention-budget force-park keeps eviction-exempt tabs mounted. */
   isForceParked?: boolean
   shouldMeasureHiddenWorktree?: boolean
   activityTerminalPortals?: ActivityTerminalPortalTarget[]
-  /** Non-null for targeted background mounts: only these terminal tabs get a
-   *  TerminalPane, so waking one slept agent does not connect every saved tab. */
+  /** Targeted mounts connect only these terminal tabs. */
   backgroundMountTabIds?: ReadonlySet<string> | null
-  /** Only cold-activation deferred tabs receive immediate parked watcher
-   *  coverage; targeted mounts keep their existing delayed parking policy. */
+  /** Cold-activation deferred tabs receive immediate parked watcher coverage. */
   activationDeferredMountTabIds?: ReadonlySet<string> | null
-  onInitialTerminalRenderSettled?: (tabId: string) => void
 }): React.JSX.Element | null {
   const { terminalTabs, unifiedTabs, groups, activeGroupId } = useAppStore(
     useShallow((state) => ({
@@ -63,11 +61,6 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
 
   useNativeChatToggleShortcut(worktreeId, isWorktreeActive)
 
-  // Why: legacy TabGroupPanel routed terminal closes through
-  // commands.closeItem → leaveWorktreeIfEmpty, which deselected the worktree
-  // when the last renderable tab closed and sent the user back to Landing.
-  // Run this only after the guarded close resolves; a pending/cancelled pinned
-  // close must leave the worktree and paired-web mirror selected.
   const leaveWorktreeIfEmpty = useCallback(() => {
     const state = useAppStore.getState()
     if (state.activeWorktreeId !== worktreeId) {
@@ -84,12 +77,30 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
     [focusGroup, worktreeId]
   )
 
-  const assignments = useMemo(
-    () => buildTerminalOverlayAssignments(groups, unifiedTabs),
-    [groups, unifiedTabs]
-  )
+  const groupActiveTabById = useMemo(() => {
+    const lookup: Record<string, string | null | undefined> = {}
+    for (const group of groups) {
+      lookup[group.id] = group.activeTabId
+    }
+    return lookup
+  }, [groups])
 
-  const { parkedTerminalTabIds, coldParkedTerminalTabIds } = useTerminalTabColdParking({
+  const assignments = useMemo(() => {
+    const entries = new Map<string, TerminalOverlayAssignment>()
+    for (const tab of unifiedTabs) {
+      if (tab.contentType !== 'terminal') {
+        continue
+      }
+      entries.set(tab.entityId, {
+        unifiedTabId: tab.id,
+        groupId: tab.groupId,
+        isActiveInGroup: groupActiveTabById[tab.groupId] === tab.id
+      })
+    }
+    return entries
+  }, [groupActiveTabById, unifiedTabs])
+
+  const parkedTerminalTabIds = useTerminalTabColdParking({
     worktreeId,
     terminalTabs,
     assignments,
@@ -100,16 +111,6 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
     activityTerminalPortals,
     activationDeferredMountTabIds
   })
-  const { presentedTerminalTabIdByGroup: presentationByScope, handleInitialRenderSettled } =
-    useTerminalOverlayPresentation({
-      groups,
-      terminalTabs,
-      assignments,
-      coldParkedTerminalTabIds,
-      isWorktreeActive,
-      activeGroupId,
-      onInitialTerminalRenderSettled
-    })
 
   if (!worktreePath) {
     return null
@@ -123,17 +124,12 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
         )
         .map((terminalTab) => {
           const assignment = assignments.get(terminalTab.id)
-          const isVisible = Boolean(isWorktreeActive && assignment && assignment.isActiveInGroup)
-          const isActive = Boolean(isVisible && assignment && assignment.groupId === activeGroupId)
-          const isPresented = Boolean(
-            assignment && presentationByScope.get(assignment.groupId) === terminalTab.id
-          )
+          const isVisible = Boolean(isWorktreeActive && assignment?.isActiveInGroup)
+          const isActive = Boolean(isVisible && assignment?.groupId === activeGroupId)
           const activityTerminalPortal = findActivityTerminalPortal(activityTerminalPortals, {
             worktreeId,
             tabId: terminalTab.id
           })
-          // Why: parking unmounts only the view; the parked watcher owns exit
-          // and side-effect handling until this tab is eligible to remount.
           if (parkedTerminalTabIds.has(terminalTab.id)) {
             return null
           }
@@ -147,15 +143,12 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
               startupCwd={terminalTab.startupCwd}
               groupId={assignment?.groupId}
               isWorktreeActive={isWorktreeActive}
-              isWorktreePresented={isWorktreePresented}
               isVisible={isVisible}
-              isPresented={isPresented}
               isActive={isActive}
               activityTerminalPortal={activityTerminalPortal}
               onFocusOwningGroup={focusOwningGroup}
               consumeSuppressedPtyExit={consumeSuppressedPtyExit}
               leaveWorktreeIfEmpty={leaveWorktreeIfEmpty}
-              onInitialRenderSettled={() => handleInitialRenderSettled(terminalTab.id)}
             />
           )
         })}
