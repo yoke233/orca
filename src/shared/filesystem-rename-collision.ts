@@ -1,6 +1,13 @@
-import { lstat } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, dirname } from 'node:path'
+
+type RenameCollisionFilesystem = {
+  lstat(path: string): Promise<Stats>
+  realpath(path: string): Promise<string>
+}
+
+const nodeRenameCollisionFilesystem: RenameCollisionFilesystem = { lstat, realpath }
 
 function isENOENT(error: unknown): boolean {
   return (
@@ -18,23 +25,47 @@ function hasSameFilesystemIdentity(oldStat: Stats, newStat: Stats): boolean {
   return oldStat.dev === newStat.dev && oldStat.ino === newStat.ino
 }
 
-function isCaseOnlySameParentRename(oldPath: string, newPath: string): boolean {
+async function isSameDirectoryEntryRename(
+  oldPath: string,
+  newPath: string,
+  oldStat: Stats,
+  newStat: Stats,
+  filesystem: RenameCollisionFilesystem
+): Promise<boolean> {
   const oldBasename = basename(oldPath)
   const newBasename = basename(newPath)
-  return (
-    dirname(oldPath) === dirname(newPath) &&
-    oldBasename !== newBasename &&
-    caseFoldFileExplorerBasename(oldBasename) === caseFoldFileExplorerBasename(newBasename)
-  )
+  if (!hasSameFilesystemIdentity(oldStat, newStat) || dirname(oldPath) !== dirname(newPath)) {
+    return false
+  }
+  if (oldPath === newPath) {
+    return true
+  }
+  try {
+    const [oldRealPath, newRealPath] = await Promise.all([
+      filesystem.realpath(oldPath),
+      filesystem.realpath(newPath)
+    ])
+    return oldRealPath === newRealPath
+  } catch (error) {
+    // Preserve case-only renames for dangling symlinks, which realpath cannot resolve.
+    if (!isENOENT(error)) {
+      throw error
+    }
+    return (
+      oldBasename !== newBasename &&
+      caseFoldFileExplorerBasename(oldBasename) === caseFoldFileExplorerBasename(newBasename)
+    )
+  }
 }
 
 export async function assertNoClobberRenameDestinationAvailable(
   oldPath: string,
-  newPath: string
+  newPath: string,
+  filesystem: RenameCollisionFilesystem = nodeRenameCollisionFilesystem
 ): Promise<void> {
   let newStat: Stats
   try {
-    newStat = await lstat(newPath)
+    newStat = await filesystem.lstat(newPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -42,8 +73,8 @@ export async function assertNoClobberRenameDestinationAvailable(
     throw error
   }
 
-  const oldStat = await lstat(oldPath)
-  if (hasSameFilesystemIdentity(oldStat, newStat) && isCaseOnlySameParentRename(oldPath, newPath)) {
+  const oldStat = await filesystem.lstat(oldPath)
+  if (await isSameDirectoryEntryRename(oldPath, newPath, oldStat, newStat, filesystem)) {
     return
   }
 
