@@ -38,4 +38,6 @@ export type MobileNativeChatController = {
     images?: string[],
     deadline?: number
   ) => Promise<MobileNativeChatSendOutcome>
+  /** Launch-context text still parked on the agent's TUI input line, or null. */
+  readSeededLaunchDraft: () => string | null
 }

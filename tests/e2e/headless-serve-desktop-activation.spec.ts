@@ -23,6 +23,7 @@ import {
 } from './helpers/terminal'
 import { ensureTerminalVisible, waitForActiveWorktree, waitForSessionReady } from './helpers/store'
 import { RuntimeClient } from '../../src/cli/runtime/client'
+import { RuntimeClientError } from '../../src/cli/runtime/types'
 import type {
   RuntimeStatus,
   RuntimeTerminalCreate,
@@ -119,10 +120,22 @@ test('promotes the headless owner without replacing its daemon terminal', async 
     const client = new RuntimeClient(userDataDir, 5_000)
 
     await expect
-      .poll(async () => (await client.getCliStatus()).result.app.desktopWindowStatus, {
-        timeout: 60_000,
-        message: 'headless serve never became safely openable'
-      })
+      .poll(
+        async () => {
+          try {
+            return (await client.getCliStatus()).result.app.desktopWindowStatus
+          } catch (error) {
+            if (error instanceof RuntimeClientError && error.code === 'runtime_unavailable') {
+              return 'starting'
+            }
+            throw error
+          }
+        },
+        {
+          timeout: 60_000,
+          message: 'headless serve never became safely openable'
+        }
+      )
       .toBe('openable')
 
     const beforeStatus = await client.call<RuntimeStatus>('status.get')

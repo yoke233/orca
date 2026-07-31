@@ -69,7 +69,11 @@ import {
   type SafeFitContinuationHandle
 } from '@/lib/pane-manager/pane-tree-ops'
 import { requestStablePaneFit } from '@/lib/pane-manager/pane-fit-resize-observer'
-import { getFitOverrideForPty, bindPanePtyId } from '@/lib/pane-manager/mobile-fit-overrides'
+import {
+  bindPanePtyId,
+  getFitOverrideForPty,
+  onOverrideChange
+} from '@/lib/pane-manager/mobile-fit-overrides'
 import { isPtyLocked } from '@/lib/pane-manager/mobile-driver-state'
 import { reconcilePtySizeAcrossFrames, type PtySizeReconcileHandle } from './pty-size-reconcile'
 import { shouldClaimRemoteDesktopViewport } from './remote-desktop-viewport-claim'
@@ -2249,14 +2253,26 @@ export function connectPanePty(
     terminalKeyTarget.addEventListener('keydown', onTerminalKeyDown, { capture: true })
   }
 
+  let visibleRemoteViewportClaimPtyId: string | null = null
+  let pendingVisibleRemoteViewportClaim = false
   const setPanePtyFitBinding = (ptyId: string): void => {
     bindPanePtyId(pane.id, ptyId, deps.tabId)
     pane.container.dataset.ptyId = ptyId
+    if (
+      deps.isVisibleRef.current &&
+      isRemoteRuntimePtyId(ptyId) &&
+      visibleRemoteViewportClaimPtyId !== ptyId
+    ) {
+      // Why: the initial fit event consumes this activation arm before later peer ownership changes.
+      visibleRemoteViewportClaimPtyId = ptyId
+      pendingVisibleRemoteViewportClaim = true
+    }
     // Why: override hydration can arrive before this pane knows its PTY. Once
-    // data-pty-id is bound, safeFit can park xterm at the held phone grid.
+    // data-pty-id is bound, safeFit can park xterm at the authoritative grid.
     if (getFitOverrideForPty(ptyId)) {
       safeFit(pane)
     }
+    claimPendingVisibleRemoteViewport()
   }
   let activePanePtyBinding: string | null = null
   // Why: bind time lets async liveness reconcile ignore a request started
@@ -2310,6 +2326,8 @@ export function connectPanePty(
     // Why: fit bindings live in a module-level map, so pane teardown must
     // clear them explicitly instead of relying on DOM removal.
     bindPanePtyId(pane.id, null, deps.tabId)
+    visibleRemoteViewportClaimPtyId = null
+    pendingVisibleRemoteViewportClaim = false
     activePanePtyBinding = null
     activePanePtyBindingBoundAt = null
     delete pane.container.dataset.ptyId
@@ -3847,6 +3865,52 @@ export function connectPanePty(
       transport.claimViewport?.(cols, rows)
     }
   }
+  const claimPendingVisibleRemoteViewport = (): void => {
+    if (
+      !pendingVisibleRemoteViewportClaim ||
+      !deps.isVisibleRef.current ||
+      typeof document === 'undefined' ||
+      document.visibilityState === 'hidden' ||
+      typeof document.hasFocus !== 'function' ||
+      !document.hasFocus()
+    ) {
+      return
+    }
+    claimViewportForUserActivity()
+  }
+  const armVisibleRemoteViewportClaim = (): void => {
+    const ptyId = transport.getPtyId()
+    if (!ptyId || !isRemoteRuntimePtyId(ptyId)) {
+      visibleRemoteViewportClaimPtyId = null
+      pendingVisibleRemoteViewportClaim = false
+      return
+    }
+    if (
+      visibleRemoteViewportClaimPtyId !== ptyId ||
+      pendingVisibleRemoteViewportClaim ||
+      getFitOverrideForPty(ptyId)?.mode === 'remote-desktop-fit'
+    ) {
+      visibleRemoteViewportClaimPtyId = ptyId
+      pendingVisibleRemoteViewportClaim = true
+    }
+  }
+  const unsubscribeRemoteDesktopActivationClaim = onOverrideChange((event) => {
+    if (event.ptyId !== transport.getPtyId() || !isRemoteRuntimePtyId(event.ptyId)) {
+      return
+    }
+    if (event.mode === 'desktop-fit') {
+      visibleRemoteViewportClaimPtyId = event.ptyId
+      pendingVisibleRemoteViewportClaim = false
+      return
+    }
+    if (event.mode === 'remote-desktop-fit') {
+      if (deps.isVisibleRef.current && visibleRemoteViewportClaimPtyId !== event.ptyId) {
+        visibleRemoteViewportClaimPtyId = event.ptyId
+        pendingVisibleRemoteViewportClaim = true
+      }
+      claimPendingVisibleRemoteViewport()
+    }
+  })
 
   // Why: an unbound transport (detached during a remount/move and never
   // rebound) silently rejects every keystroke while the PTY stays alive and
@@ -8726,15 +8790,22 @@ export function connectPanePty(
       agentCompletionCoordinator.startProcessTracking()
       // Why: the hidden-delivery gate must follow every pane visibility flip.
       syncHiddenRendererPtyDelivery()
+      if (!deps.isVisibleRef.current) {
+        pendingVisibleRemoteViewportClaim = false
+      }
     },
     // Why: visible-resume size readback repairs dropped hidden resizes without refitting against xterm's transient hidden DOM fallback.
     noteVisibilityResume() {
+      armVisibleRemoteViewportClaim()
+      claimPendingVisibleRemoteViewport()
       ptySizeReassertion.request({ fit: false })
       consumeHibernatedAgentWake()
       requestKnownDroidReconfirmation()
       sampleVisiblePaneForegroundAgent()
     },
     reassertPtySizeAfterWindowWake() {
+      armVisibleRemoteViewportClaim()
+      claimPendingVisibleRemoteViewport()
       ptySizeReassertion.request({ fit: false })
     },
     // Why: mobile wake reaches this pane while it's hidden on the desktop, so consume only the armed hibernation wake — no size/foreground reads.
@@ -8813,6 +8884,7 @@ export function connectPanePty(
       // Why: park/reconnect/remount doesn't advance the recovery epoch, so invalidate this xterm or its delayed retry could hit the next instance.
       terminalRecoveryInstance.unregister()
       unregisterUndeliverableWriteHandler()
+      unsubscribeRemoteDesktopActivationClaim()
       cancelHiddenOutputSnapshotScrollRestore()
       structuralReplayCoordinator.dispose()
       cancelFreshSpawnFollowReset()
