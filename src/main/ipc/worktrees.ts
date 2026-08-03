@@ -92,6 +92,7 @@ import {
   loadHooks,
   parseOrcaYaml,
   readIssueCommand,
+  resolveSetupRunnerShell,
   runHook,
   hasHooksFile,
   hasUnrecognizedOrcaYamlKeys,
@@ -150,6 +151,8 @@ type RemoveWorktreeArgs = {
   worktreeId: string
   hostId?: ExecutionHostId
   force?: boolean
+  /** Explicit Force Delete only — `force` alone is set by the ordinary confirmation (#11960). */
+  allowUnverifiedPtyStop?: boolean
   skipArchive?: boolean
 }
 
@@ -158,8 +161,9 @@ type DetectedWorktreeRequestArgs = { repoId: string } | ListDetectedWorktreesArg
 async function stopPtysForDestructiveWorktreeRemoval(
   runtime: OrcaRuntimeService,
   worktreeId: string,
-  connectionId?: string
+  options: { connectionId?: string; allowUnverifiedStop?: boolean } = {}
 ): Promise<void> {
+  const { connectionId, allowUnverifiedStop } = options
   const provider = connectionId ? getSshPtyProvider(connectionId) : getLocalPtyProvider()
   if (!provider) {
     throw new Error(`PTY provider unavailable for worktree deletion: ${worktreeId}`)
@@ -169,6 +173,9 @@ async function stopPtysForDestructiveWorktreeRemoval(
     localProvider: provider,
     onPtyStopped: clearProviderPtyState,
     requirePhysicalStop: true,
+    // Why (#11960): set only by an explicit Force Delete, never by the ordinary
+    // confirmation — otherwise the gate would be off on the primary delete path.
+    ...(allowUnverifiedStop ? { allowUnverifiedStop: true } : {}),
     ...(connectionId ? { includeLocalRegistry: false } : {})
   })
   const total =
@@ -288,9 +295,31 @@ async function mapWithConcurrency<T, R>(
   return results
 }
 
-function removeWorktreeMetadataAndTransientState(store: Store, worktreeId: string): void {
+// Why: the worktree's own persisted host outranks the repo fallback; teardown and metadata purge must resolve the same owner
+// or the purge lands on the local partition while the SSH/runtime one keeps the workspace's tabs forever.
+function resolveWorktreeRemovalOwnerHostId(
+  store: Store,
+  worktreeId: string,
+  repo: Repo | undefined,
+  fallbackHostId?: ExecutionHostId
+): ExecutionHostId | undefined {
+  return (
+    store.getWorktreeMeta(worktreeId)?.hostId ??
+    (repo ? getRepoExecutionHostId(repo) : fallbackHostId)
+  )
+}
+
+function removeWorktreeMetadataAndTransientState(
+  store: Store,
+  worktreeId: string,
+  hostId?: ExecutionHostId
+): void {
   // Why: worktree IDs are path-derived and reusable; drop process-local caches before the same ID can map to a new workspace.
-  store.removeWorktreeMeta(worktreeId)
+  if (hostId) {
+    store.removeWorktreeMeta(worktreeId, hostId)
+  } else {
+    store.removeWorktreeMeta(worktreeId)
+  }
   advertisedUrlWatcher.forgetWorktree(worktreeId)
   // Why: drop this worktree's localhost label routes so they don't accumulate in the proxy's route maps all session.
   localhostWorktreeLabelProxy.unregisterWorktree(worktreeId)
@@ -397,10 +426,17 @@ function gitStatusErrorMeansNotRepository(error: unknown): boolean {
   return /not a git repository/i.test(`${message}\n${stderr}`)
 }
 
-function getWorktreeRemovalOptionsKey(args: { force?: boolean; skipArchive?: boolean }): string {
+function getWorktreeRemovalOptionsKey(args: {
+  force?: boolean
+  allowUnverifiedPtyStop?: boolean
+  skipArchive?: boolean
+}): string {
   const forceKey = args.force === true ? 'force' : 'normal'
   const archiveKey = args.skipArchive === true ? 'skip-archive' : 'run-archive'
-  return `${forceKey}:${archiveKey}`
+  // Why: a Force Delete retry must not coalesce onto the in-flight attempt that
+  // just failed the PTY gate — it would inherit that failure instead of retrying.
+  const ptyKey = args.allowUnverifiedPtyStop === true ? 'allow-unverified-pty' : 'require-pty-stop'
+  return `${forceKey}:${archiveKey}:${ptyKey}`
 }
 
 function getWorktreeRemovalInFlightKey(worktreeId: string, hostId?: ExecutionHostId): string {
@@ -2231,10 +2267,9 @@ export function registerWorktreeHandlers(
       if (!repo) {
         throw new Error(`Repo not found: ${repoId}`)
       }
-      const inFlightKey = getWorktreeRemovalInFlightKey(
-        args.worktreeId,
-        getRepoExecutionHostId(repo)
-      )
+      // The resolved repo supplies host ownership when legacy callers omit args.hostId.
+      const removalHostId = getRepoExecutionHostId(repo)
+      const inFlightKey = getWorktreeRemovalInFlightKey(args.worktreeId, removalHostId)
       const optionsKey = getWorktreeRemovalOptionsKey(args)
       const inFlightRemoval = worktreeRemovalsInFlight.get(inFlightKey)
       if (inFlightRemoval) {
@@ -2265,7 +2300,7 @@ export function registerWorktreeHandlers(
               })
             })
             await withWorktreeRemoveStageSpan('metadata_purge', 'folder', async () => {
-              removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+              removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
             })
             preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
             notifyWorktreesChanged(mainWindow, repoId)
@@ -2337,11 +2372,10 @@ export function registerWorktreeHandlers(
                 )
                 let removalCompleted = false
                 try {
-                  await stopPtysForDestructiveWorktreeRemoval(
-                    runtime,
-                    args.worktreeId,
-                    repo.connectionId
-                  )
+                  await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId, {
+                    connectionId: repo.connectionId,
+                    allowUnverifiedStop: args.allowUnverifiedPtyStop
+                  })
                   await fsProvider!.deletePath(worktreePath, true)
                   removalCompleted = true
                 } finally {
@@ -2358,7 +2392,9 @@ export function registerWorktreeHandlers(
                 const removalGate = await runtime.acquireFileWatcherRemoval(worktreePath)
                 let removalCompleted = false
                 try {
-                  await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId)
+                  await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId, {
+                    allowUnverifiedStop: args.allowUnverifiedPtyStop
+                  })
                   await removeLocalWorktreePath(worktreePath, localWorktreeGitOptions)
                   removalCompleted = true
                 } finally {
@@ -2374,7 +2410,7 @@ export function registerWorktreeHandlers(
                 invalidateAuthorizedRootsCache()
               }
               runtime.clearOptimisticReconcileToken(args.worktreeId)
-              removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+              removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
               preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
               notifyWorktreesChanged(mainWindow, repoId)
               return {}
@@ -2403,7 +2439,9 @@ export function registerWorktreeHandlers(
                 const removalGate = await runtime.acquireFileWatcherRemoval(worktreePath)
                 let removalCompleted = false
                 try {
-                  await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId)
+                  await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId, {
+                    allowUnverifiedStop: args.allowUnverifiedPtyStop
+                  })
                   await removeLocalWorktreePath(worktreePath, localWorktreeGitOptions)
                   removalCompleted = true
                 } finally {
@@ -2417,7 +2455,7 @@ export function registerWorktreeHandlers(
                   localWorktreeGitOptions
                 )
                 runtime.clearOptimisticReconcileToken(args.worktreeId)
-                removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+                removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
                 preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
                 invalidateAuthorizedRootsCache()
                 notifyWorktreesChanged(mainWindow, repoId)
@@ -2449,7 +2487,7 @@ export function registerWorktreeHandlers(
                 invalidateAuthorizedRootsCache()
               }
               runtime.clearOptimisticReconcileToken(args.worktreeId)
-              removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+              removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
               preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
               notifyWorktreesChanged(mainWindow, repoId)
               return {}
@@ -2503,7 +2541,7 @@ export function registerWorktreeHandlers(
               removedPushTarget
             )
             runtime.clearOptimisticReconcileToken(args.worktreeId)
-            removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+            removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
             invalidateAuthorizedRootsCache()
             notifyWorktreesChanged(mainWindow, repoId)
             return removalResult ?? {}
@@ -2561,11 +2599,10 @@ export function registerWorktreeHandlers(
             let removalCompleted = false
             try {
               await withWorktreeRemoveStageSpan('pty_sweep', 'remote', async () => {
-                await stopPtysForDestructiveWorktreeRemoval(
-                  runtime,
-                  args.worktreeId,
-                  remoteConnectionId
-                )
+                await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId, {
+                  connectionId: remoteConnectionId,
+                  allowUnverifiedStop: args.allowUnverifiedPtyStop
+                })
               })
               rawRemovalResult = await withWorktreeRemoveStageSpan(
                 'git_remove',
@@ -2602,7 +2639,7 @@ export function registerWorktreeHandlers(
             )
             runtime.clearOptimisticReconcileToken(args.worktreeId)
             await withWorktreeRemoveStageSpan('metadata_purge', 'remote', async () => {
-              removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+              removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
             })
             notifyWorktreesChanged(mainWindow, repoId)
             return removalResult ?? {}
@@ -2668,7 +2705,9 @@ export function registerWorktreeHandlers(
             // Why: hold the watcher/terminal gate through Git and any recursive fallback so no late spawn recreates a native handle.
             // Linked-path deletion is destructive too, so PTYs must release every handle before Windows or WSL filesystem cleanup starts.
             await withWorktreeRemoveStageSpan('pty_sweep', 'local', async () => {
-              await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId)
+              await stopPtysForDestructiveWorktreeRemoval(runtime, args.worktreeId, {
+                allowUnverifiedStop: args.allowUnverifiedPtyStop
+              })
             })
 
             // Why: preflight only ignored these paths, not mutated them; keep watcher installs fenced through Git removal.
@@ -2746,7 +2785,7 @@ export function registerWorktreeHandlers(
                   localWorktreeGitOptions
                 )
                 runtime.clearOptimisticReconcileToken(args.worktreeId)
-                removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+                removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
                 preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
                 invalidateAuthorizedRootsCache()
                 notifyWorktreesChanged(mainWindow, repoId)
@@ -2777,7 +2816,7 @@ export function registerWorktreeHandlers(
           )
           runtime.clearOptimisticReconcileToken(args.worktreeId)
           await withWorktreeRemoveStageSpan('metadata_purge', 'local', async () => {
-            removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+            removeWorktreeMetadataAndTransientState(store, args.worktreeId, removalHostId)
           })
           await withWorktreeRemoveStageSpan('cache_invalidation', 'local', async () => {
             invalidateAuthorizedRootsCache()
@@ -2813,13 +2852,12 @@ export function registerWorktreeHandlers(
     ): Promise<RemoveWorktreeResult> => {
       const { repoId } = parseWorktreeId(args.worktreeId)
       const repo = getRepoForWorktreeRemoval(store, repoId, args.hostId)
-      if (!repo) {
-        throw new Error(`Repo not found: ${repoId}`)
-      }
-      // Why: share the removal in-flight map so concurrent remove and forgetLocal on the same id can't both mutate metadata.
+      // Repo-first (unlike owner resolution below) so this key matches worktrees:remove's; meta only covers ownerless forgets.
       const inFlightKey = getWorktreeRemovalInFlightKey(
         args.worktreeId,
-        getRepoExecutionHostId(repo)
+        repo
+          ? getRepoExecutionHostId(repo)
+          : (store.getWorktreeMeta(args.worktreeId)?.hostId ?? args.hostId)
       )
       const optionsKey = 'forget-local'
       const inFlight = worktreeRemovalsInFlight.get(inFlightKey)
@@ -2831,23 +2869,50 @@ export function registerWorktreeHandlers(
       }
 
       const forget = (async (): Promise<RemoveWorktreeResult> => {
-        if (isFolderRepo(repo) && args.worktreeId === getFolderWorkspaceRootId(repo)) {
+        // Ambiguous repo lookup must not bypass a live folder root's deletion guard.
+        const isFolderRootOf = (candidate: Repo): boolean =>
+          isFolderRepo(candidate) && args.worktreeId === getFolderWorkspaceRootId(candidate)
+        if (repo ? isFolderRootOf(repo) : store.getRepos().some(isFolderRootOf)) {
           throw new Error(
             'Cannot delete the project root workspace. Remove the folder project instead.'
           )
         }
 
-        // Why: best-effort PTY sweep; resolves synchronously for a dead SSH relay (tombstoned lease) so it never hangs.
+        const ownerHostId = resolveWorktreeRemovalOwnerHostId(
+          store,
+          args.worktreeId,
+          repo,
+          args.hostId
+        )
+        const ownerHost = parseExecutionHostId(ownerHostId)
+        const sshPtyProvider =
+          ownerHost?.kind === 'ssh' ? getSshPtyProvider(ownerHost.targetId) : undefined
+        const externalHost = ownerHost?.kind === 'ssh' || ownerHost?.kind === 'runtime'
+        // External host inventories must never sweep a same-id local workspace.
         await killAllProcessesForWorktree(args.worktreeId, {
           runtime,
-          localProvider: getLocalPtyProvider(),
-          onPtyStopped: clearProviderPtyState
+          resolvedWorktreeId: args.worktreeId,
+          ...(ownerHost?.kind === 'ssh' ? { resolvedConnectionId: ownerHost.targetId } : {}),
+          ...(ownerHost?.kind === 'runtime'
+            ? { resolvedRuntimeEnvironmentId: ownerHost.environmentId }
+            : {}),
+          localProvider: sshPtyProvider ?? getLocalPtyProvider(),
+          onPtyStopped: clearProviderPtyState,
+          ...(externalHost
+            ? {
+                includeProviderInventory: ownerHost?.kind === 'ssh' && Boolean(sshPtyProvider),
+                includeLocalRegistry: false
+              }
+            : {})
         }).catch((err) => {
           console.warn(`[worktree-teardown] forget-local failed for ${args.worktreeId}:`, err)
         })
 
         runtime.clearOptimisticReconcileToken(args.worktreeId)
-        removeWorktreeMetadataAndTransientState(store, args.worktreeId)
+        // The resolved owner, not args.hostId: an orphan forget with no hostId still has to purge its SSH/runtime partition.
+        removeWorktreeMetadataAndTransientState(store, args.worktreeId, ownerHost?.id)
+        // Why: cached roots outlive the forgotten workspace, so an ownerless path stays filesystem-authorized until a rebuild.
+        invalidateAuthorizedRootsCache()
         preservedBranchCleanupByWorktreeId.delete(args.worktreeId)
         notifyWorktreesChanged(mainWindow, repoId)
         return {}
@@ -3060,7 +3125,8 @@ export function registerWorktreeHandlers(
         repo,
         args.worktreePath,
         args.command,
-        getLocalProjectWorktreeGitOptions(store, repo)
+        getLocalProjectWorktreeGitOptions(store, repo),
+        resolveSetupRunnerShell(store.getSettings())
       )
     }
   )
