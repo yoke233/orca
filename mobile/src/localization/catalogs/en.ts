@@ -53,6 +53,7 @@ export const english = {
   'host.worktreeOne': '{count} worktree',
   'host.worktreeMany': '{count} worktrees',
   'host.activeWorktrees': ' · {count} active',
+  'host.worktreeListUnavailable': 'Worktree list unavailable',
   'host.discoveryHint': 'Update desktop Orca and sign in to connect from anywhere',
   'settings.title': 'Settings',
   'settings.language': 'Language',

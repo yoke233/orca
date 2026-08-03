@@ -33,6 +33,7 @@ export function MobileHostCard(props: {
   verdict: ConnectionVerdict
   path: MobileConnectionPath
   worktreeCounts?: { total: number; active: number }
+  worktreeCountsUnavailable?: boolean
   onPress: () => void
   onLongPress: () => void
 }) {
@@ -62,7 +63,9 @@ export function MobileHostCard(props: {
           ? t('host.activeWorktrees', { count: props.worktreeCounts.active })
           : ''
       }`
-    : null
+    : props.worktreeCountsUnavailable
+      ? t('host.worktreeListUnavailable')
+      : null
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}

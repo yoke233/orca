@@ -277,47 +277,90 @@ describe('Windows IME keyboard ownership', () => {
     harness.dispose()
   })
 
-  it('does not turn a native Windows IME Shift toggle into a newline', () => {
+  it('clears held Shift when an IME-consumed keyup reports Process', () => {
     const harness = createHarness()
     const hook = renderHook(() => useTerminalKeyboardShortcuts(harness.deps))
-    harness.startComposition()
-    for (const event of [
+    harness.terminalInput.dispatchEvent(
       keyboardEvent('keydown', {
-        key: 'Process',
+        key: 'Shift',
         code: 'ShiftLeft',
-        keyCode: 229,
+        keyCode: 16,
         timeStamp: 1,
-        isComposing: true,
         shiftKey: true
-      }),
-      keyboardEvent('keydown', {
-        key: 'Shift',
-        code: 'ShiftLeft',
-        keyCode: 16,
-        timeStamp: 2,
-        isComposing: true,
-        shiftKey: true
-      }),
+      })
+    )
+    harness.terminalInput.dispatchEvent(
       keyboardEvent('keyup', {
         key: 'Process',
         code: 'ShiftLeft',
         keyCode: 229,
-        timeStamp: 3,
-        isComposing: true,
-        shiftKey: true
-      }),
-      keyboardEvent('keyup', {
-        key: 'Shift',
-        code: 'ShiftLeft',
-        keyCode: 16,
-        timeStamp: 4,
+        timeStamp: 10,
         isComposing: true
       })
-    ]) {
-      harness.terminalInput.dispatchEvent(event)
-    }
-    vi.runAllTimers()
+    )
+    const enter = keyboardEvent('keydown', {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      timeStamp: 20
+    })
 
+    harness.terminalInput.dispatchEvent(enter)
+
+    expect(enter.defaultPrevented).toBe(false)
+    hook.unmount()
+    harness.dispose()
+  })
+
+  it.each([
+    { code: 'ShiftLeft', shiftKey: true },
+    { code: 'KeyQ', shiftKey: true },
+    { code: 'KeyW', ctrlKey: true }
+  ])('keeps an IME-consumed $code out of terminal shortcuts', (modifier) => {
+    const harness = createHarness()
+    const hook = renderHook(() => useTerminalKeyboardShortcuts(harness.deps))
+    const laterWindowHandler = vi.fn()
+    window.addEventListener('keydown', laterWindowHandler)
+    harness.startComposition()
+    const consumed = keyboardEvent('keydown', {
+      key: 'Process',
+      keyCode: 229,
+      timeStamp: 10,
+      isComposing: true,
+      ...modifier
+    })
+
+    harness.terminalInput.dispatchEvent(consumed)
+
+    expect(consumed.defaultPrevented).toBe(false)
+    expect(harness.sendInput).not.toHaveBeenCalled()
+    expect(harness.deps.onRequestClosePane).not.toHaveBeenCalled()
+    expect(laterWindowHandler).not.toHaveBeenCalled()
+    window.removeEventListener('keydown', laterWindowHandler)
+    hook.unmount()
+    harness.dispose()
+  })
+
+  it('keeps an IME-consumed Ctrl+Shift+F out of file search', () => {
+    const harness = createHarness()
+    const pane = harness.deps.managerRef.current?.getActivePane()
+    vi.mocked(pane!.terminal.getSelection).mockReturnValue('needle')
+    const hook = renderHook(() => useTerminalKeyboardShortcuts(harness.deps))
+    harness.startComposition()
+
+    harness.terminalInput.dispatchEvent(
+      keyboardEvent('keydown', {
+        key: 'Process',
+        code: 'KeyF',
+        keyCode: 229,
+        timeStamp: 10,
+        isComposing: true,
+        ctrlKey: true,
+        shiftKey: true
+      })
+    )
+
+    expect(harness.deps.onSearchSelectedText).not.toHaveBeenCalled()
     expect(harness.sendInput).not.toHaveBeenCalled()
     hook.unmount()
     harness.dispose()
