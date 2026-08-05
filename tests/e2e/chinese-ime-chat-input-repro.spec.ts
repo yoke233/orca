@@ -13,7 +13,6 @@ import {
   waitForTerminalOutput
 } from './helpers/terminal'
 import {
-  dispatchWindowsImeBackspace,
   dispatchWindowsImeShiftToggle,
   readPtyInputCount,
   readPtyInputs
@@ -88,7 +87,7 @@ const CODEX_UPDATE_PROMPT_RE = /update available|install update|Skip for now/i
 const LINUX_IME_POLICY_USER_AGENT =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/146 Safari/537.36'
 const WINDOWS_IME_POLICY_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) OrcaDev/1.4.162-rc.0 Chrome/150.0.0.0 Electron/43.1.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36'
 
 function terminalImeHarnessScript(runId: string, inputLogPath?: string): string {
   return `
@@ -268,14 +267,26 @@ async function readActiveCompositionText(page: Page): Promise<string> {
   })
 }
 
-async function reloadWithImePolicy(page: Page, userAgent: string): Promise<void> {
+async function reloadWithWindowsImePolicy(page: Page): Promise<void> {
   await page.addInitScript((userAgent) => {
     Object.defineProperty(navigator, 'userAgent', {
       get: () => userAgent,
       configurable: true
     })
-  }, userAgent)
-  // Why: platform-gated IME policy must see the simulated OS before the terminal pane mounts.
+  }, WINDOWS_IME_POLICY_USER_AGENT)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 30_000 })
+}
+
+async function reloadWithLinuxImePolicy(page: Page): Promise<void> {
+  await page.addInitScript((userAgent) => {
+    Object.defineProperty(navigator, 'userAgent', {
+      get: () => userAgent,
+      configurable: true
+    })
+  }, LINUX_IME_POLICY_USER_AGENT)
+  // Why: the Sogou repro validates Linux-gated terminal IME policy on macOS
+  // runners; reload before the terminal pane mounts so lifecycle code sees it.
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 30_000 })
 }
@@ -502,7 +513,7 @@ async function launchCodexTui(page: Page, ptyId: string): Promise<void> {
 }
 
 test.describe('Chinese IME terminal chat input repro', () => {
-  test('keeps composed Chinese text, cursor movement, deletion, and Shift stable in the agent input surface', async ({
+  test('keeps composed Chinese text, cursor movement, and Backspace stable in the agent input surface', async ({
     orcaPage,
     testRepoPath
   }, testInfo) => {
@@ -514,9 +525,7 @@ test.describe('Chinese IME terminal chat input repro', () => {
     const ptyId = await waitForActivePanePtyId(orcaPage)
     const runId = randomUUID()
     const scriptPath = path.join(testRepoPath, `.orca-chinese-ime-harness-${runId}.cjs`)
-    const inputLogPath = path.join(testRepoPath, `.orca-chinese-ime-input-${runId}.jsonl`)
-    writeFileSync(scriptPath, terminalImeHarnessScript(runId, inputLogPath))
-    writeFileSync(inputLogPath, '')
+    writeFileSync(scriptPath, terminalImeHarnessScript(runId))
     const session = await orcaPage.context().newCDPSession(orcaPage)
 
     try {
@@ -565,32 +574,6 @@ test.describe('Chinese IME terminal chat input repro', () => {
         })
         .toBe('一二三四五六七八九十')
 
-      const expectedSubmitted = ['你好', '一二三四五六七八九十']
-      await setImeComposition(session, 's')
-      await dispatchWindowsImeShiftToggle(session)
-      await waitForLivePrompt(orcaPage, 's')
-      await expect.poll(() => readActiveCompositionText(orcaPage)).toBe('')
-      await expect
-        .poll(async () => (await readPromptState(orcaPage))?.submitted)
-        .toEqual(expectedSubmitted)
-      await orcaPage.keyboard.press('Backspace')
-      await waitForLivePrompt(orcaPage, '')
-
-      await setImeComposition(session, 'x')
-      const inputCountBeforeImeBackspace = readPtyInputCount(inputLogPath)
-      await dispatchWindowsImeBackspace(session)
-      await waitForLivePrompt(orcaPage, '')
-      await expect
-        .poll(() => readActiveCompositionText(orcaPage), {
-          timeout: 1_000,
-          message: 'Backspace should clear the visible one-letter IME preedit'
-        })
-        .toBe('')
-      await expect
-        .poll(async () => (await readPromptState(orcaPage))?.submitted)
-        .toEqual(expectedSubmitted)
-      await expect.poll(() => readPtyInputCount(inputLogPath)).toBe(inputCountBeforeImeBackspace)
-
       const log = await readImeEventLog(orcaPage)
       expect(
         log.some((entry) => entry.type === 'compositionstart'),
@@ -601,29 +584,22 @@ test.describe('Chinese IME terminal chat input repro', () => {
         'Windows-style IME process keys should be observable in the event trace'
       ).toBe(true)
       expect(
-        log.some(
-          (entry) =>
-            entry.type === 'keydown' &&
-            entry.key === 'Process' &&
-            entry.code === 'Backspace' &&
-            entry.keyCode === 229
-        ),
-        'native Windows IME Backspace should arrive as Process/Backspace/229'
-      ).toBe(true)
+        log.filter((entry) => entry.type === 'keydown' && entry.key === 'Backspace').length,
+        'Backspace should be observable for both the composition and single-delete assertions'
+      ).toBe(2)
     } finally {
       await attachImeEvidence(orcaPage, testInfo, 'final-ime-evidence').catch(() => undefined)
       await session.detach().catch(() => undefined)
       await sendToTerminal(orcaPage, ptyId, '\x03').catch(() => undefined)
       rmSync(scriptPath, { force: true })
-      rmSync(inputLogPath, { force: true })
     }
   })
 
-  test('does not submit a newline when Shift toggles a Windows IME', async ({
+  test('commits the active Pinyin preedit when Shift toggles the Windows IME', async ({
     orcaPage,
     testRepoPath
   }, testInfo) => {
-    await reloadWithImePolicy(orcaPage, WINDOWS_IME_POLICY_USER_AGENT)
+    await reloadWithWindowsImePolicy(orcaPage)
     await waitForSessionReady(orcaPage)
     await waitForActiveWorktree(orcaPage)
     await ensureTerminalVisible(orcaPage)
@@ -631,8 +607,8 @@ test.describe('Chinese IME terminal chat input repro', () => {
 
     const ptyId = await waitForActivePanePtyId(orcaPage)
     const runId = randomUUID()
-    const scriptPath = path.join(testRepoPath, `.orca-windows-shift-ime-harness-${runId}.cjs`)
-    const inputLogPath = path.join(testRepoPath, `.orca-windows-shift-ime-input-${runId}.jsonl`)
+    const scriptPath = path.join(testRepoPath, `.orca-windows-shift-ime-${runId}.cjs`)
+    const inputLogPath = path.join(testRepoPath, `.orca-windows-shift-ime-${runId}.jsonl`)
     writeFileSync(scriptPath, terminalImeHarnessScript(runId, inputLogPath))
     writeFileSync(inputLogPath, '')
     const session = await orcaPage.context().newCDPSession(orcaPage)
@@ -646,6 +622,7 @@ test.describe('Chinese IME terminal chat input repro', () => {
       await setImeComposition(session, 's')
       const inputCountBeforeShift = readPtyInputCount(inputLogPath)
       await dispatchWindowsImeShiftToggle(session)
+
       await waitForLivePrompt(orcaPage, 's')
       await expect.poll(() => readActiveCompositionText(orcaPage)).toBe('')
       await expect.poll(async () => (await readPromptState(orcaPage))?.submitted).toEqual([])
@@ -653,7 +630,7 @@ test.describe('Chinese IME terminal chat input repro', () => {
         .poll(() => readPtyInputs(inputLogPath).slice(inputCountBeforeShift))
         .toEqual(['s'])
     } finally {
-      await attachImeEvidence(orcaPage, testInfo, 'final-windows-shift-ime-evidence').catch(
+      await attachImeEvidence(orcaPage, testInfo, 'windows-shift-ime-evidence').catch(
         () => undefined
       )
       await session.detach().catch(() => undefined)
@@ -667,7 +644,7 @@ test.describe('Chinese IME terminal chat input repro', () => {
     orcaPage,
     testRepoPath
   }, testInfo) => {
-    await reloadWithImePolicy(orcaPage, LINUX_IME_POLICY_USER_AGENT)
+    await reloadWithLinuxImePolicy(orcaPage)
     await waitForSessionReady(orcaPage)
     await waitForActiveWorktree(orcaPage)
     await ensureTerminalVisible(orcaPage)

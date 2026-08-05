@@ -17,6 +17,7 @@ export const TERMINAL_REFLOW_JS = `
       generation: terminalGeneration,
       change: { cols: nextCols, rows: nextRows, reason: 'reflow' }
     });
+    emitKeyboardAvoidanceMetrics();
     scrollCoordinator.dispatch({ type: 'viewport-committed', generation: terminalGeneration });
   }
 `

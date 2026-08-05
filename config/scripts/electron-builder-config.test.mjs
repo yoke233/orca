@@ -10,11 +10,13 @@ const { FileMatcher } = require('app-builder-lib/out/fileMatcher')
 const electronBuilderNativeRebuild = require('./electron-builder-native-rebuild.cjs')
 const {
   createPackagedRuntimeNodeModuleResources,
+  findAsarEntry,
   prunePackagedNodePty,
   prunePackagedParcelWatcher,
   prunePackagedSherpaOnnx,
   prunePackagedRuntimeTypeDeclarations,
-  prunePackagedZodSources
+  prunePackagedZodSources,
+  verifyPackagedMainRuntimeDeps
 } = require('../packaged-runtime-node-modules.cjs')
 
 const MUTABLE_BUILD_ENV = [
@@ -389,40 +391,71 @@ describe('electron-builder config', () => {
     expect(electronBuilderConfig.npmRebuild).toBe(true)
   })
 
-  it('prunes non-target node-pty prebuilds from packaged runtime resources', async () => {
+  it('verifies packaged main runtime deps from Windows-style asar entries', async () => {
+    const resourcesDir = await mkdtemp(join(tmpdir(), 'orca-runtime-deps-'))
+    try {
+      await writeFile(join(resourcesDir, 'app.asar'), '', 'utf8')
+      await mkdir(join(resourcesDir, 'node_modules', 'yaml'), { recursive: true })
+      await mkdir(join(resourcesDir, 'node_modules', 'zod'), { recursive: true })
+
+      const sources = new Map([
+        ['out\\main\\index.js', 'const z = require("zod")'],
+        ['out\\main\\agent-hooks\\managed-agent-hook-controls.js', 'const YAML = require("yaml")']
+      ])
+      const asar = {
+        listPackage: () => [...sources.keys()].map((entry) => `\\${entry}`),
+        extractFile: (_asarPath, internalPath) => Buffer.from(sources.get(internalPath), 'utf8')
+      }
+
+      expect(() => verifyPackagedMainRuntimeDeps(resourcesDir, asar)).not.toThrow()
+    } finally {
+      await rm(resourcesDir, { recursive: true, force: true })
+    }
+  })
+
+  it('normalizes host-specific asar entry separators', () => {
+    expect(findAsarEntry(['\\out\\main\\index.js'], 'out/main/index.js')).toBe(
+      '\\out\\main\\index.js'
+    )
+    expect(findAsarEntry(['/out/main/index.js'], 'out/main/index.js')).toBe('/out/main/index.js')
+  })
+
+  it('prunes non-target node-pty architecture outputs from packaged runtime resources', async () => {
     const resourcesDir = await mkdtemp(join(tmpdir(), 'orca-node-pty-prune-'))
     try {
-      const prebuildsDir = join(resourcesDir, 'node_modules', 'node-pty', 'prebuilds')
+      const nodePtyDir = join(resourcesDir, 'node_modules', 'node-pty')
+      const prebuildsDir = join(nodePtyDir, 'prebuilds')
+      const binDir = join(nodePtyDir, 'bin')
       await mkdir(join(prebuildsDir, 'darwin-arm64'), { recursive: true })
       await mkdir(join(prebuildsDir, 'darwin-x64'), { recursive: true })
       await mkdir(join(prebuildsDir, 'linux-x64'), { recursive: true })
       await mkdir(join(prebuildsDir, 'win32-x64'), { recursive: true })
-      await mkdir(join(resourcesDir, 'node_modules', 'node-pty', 'third_party', 'conpty'), {
+      await mkdir(join(binDir, 'darwin-arm64-148'), { recursive: true })
+      await mkdir(join(binDir, 'darwin-x64-148'), { recursive: true })
+      await mkdir(join(nodePtyDir, 'third_party', 'conpty'), {
         recursive: true
       })
-      await mkdir(join(resourcesDir, 'node_modules', 'node-pty', 'deps', 'winpty'), {
-        recursive: true
-      })
+      await mkdir(join(nodePtyDir, 'deps', 'winpty'), { recursive: true })
 
-      prunePackagedNodePty(resourcesDir, 'darwin')
+      prunePackagedNodePty(resourcesDir, 'darwin', 3)
 
-      await expect(readdir(prebuildsDir).then((entries) => entries.sort())).resolves.toEqual([
-        'darwin-arm64',
-        'darwin-x64'
-      ])
-      await expect(
-        readdir(join(resourcesDir, 'node_modules', 'node-pty', 'third_party'))
-      ).resolves.toEqual([])
-      await expect(
-        readdir(join(resourcesDir, 'node_modules', 'node-pty', 'deps'))
-      ).resolves.toEqual([])
+      await expect(readdir(prebuildsDir)).resolves.toEqual(['darwin-arm64'])
+      await expect(readdir(binDir)).resolves.toEqual(['darwin-arm64-148'])
+      await expect(readdir(join(nodePtyDir, 'third_party'))).resolves.toEqual([])
+      await expect(readdir(join(nodePtyDir, 'deps'))).resolves.toEqual([])
+      expect(() => prunePackagedNodePty(resourcesDir, 'darwin', 4)).toThrow(
+        'Unsupported packaged runtime architecture: 4'
+      )
     } finally {
       await rm(resourcesDir, { recursive: true, force: true })
     }
   })
 
   it('copies the Windows node-pty ConPTY runtime beside the rebuilt addon', async () => {
-    for (const arch of ['x64', 'arm64']) {
+    for (const [arch, electronArch] of [
+      ['x64', 1],
+      ['arm64', 3]
+    ]) {
       const resourcesDir = await mkdtemp(join(tmpdir(), `orca-node-pty-conpty-${arch}-`))
       try {
         const nodePtyDir = join(resourcesDir, 'node_modules', 'node-pty')
@@ -441,7 +474,7 @@ describe('electron-builder config', () => {
           )
         }
 
-        prunePackagedNodePty(resourcesDir, 'win32', arch)
+        prunePackagedNodePty(resourcesDir, 'win32', electronArch)
 
         await expect(readFile(join(releaseDir, 'conpty', 'conpty.dll'), 'utf8')).resolves.toBe(
           `dll payload ${arch}`
@@ -469,7 +502,7 @@ describe('electron-builder config', () => {
     ).toBe(true)
   })
 
-  it('prunes non-target @parcel/watcher platform subpackages from packaged runtime resources', async () => {
+  it('prunes non-target @parcel/watcher architecture subpackages', async () => {
     const resourcesDir = await mkdtemp(join(tmpdir(), 'orca-parcel-watcher-prune-'))
     try {
       const parcelDir = join(resourcesDir, 'node_modules', '@parcel')
@@ -480,13 +513,15 @@ describe('electron-builder config', () => {
       await mkdir(join(parcelDir, 'watcher-linux-arm64-glibc'), { recursive: true })
       await mkdir(join(parcelDir, 'watcher-win32-x64'), { recursive: true })
 
-      prunePackagedParcelWatcher(resourcesDir, 'linux')
+      prunePackagedParcelWatcher(resourcesDir, 'linux', 'arm64')
 
       await expect(readdir(parcelDir).then((entries) => entries.sort())).resolves.toEqual([
         'watcher',
-        'watcher-linux-arm64-glibc',
-        'watcher-linux-x64-glibc'
+        'watcher-linux-arm64-glibc'
       ])
+      expect(() => prunePackagedParcelWatcher(resourcesDir, 'linux', 'universal')).toThrow(
+        'Unsupported packaged runtime architecture: universal'
+      )
     } finally {
       await rm(resourcesDir, { recursive: true, force: true })
     }
@@ -502,7 +537,7 @@ describe('electron-builder config', () => {
       // A hypothetical future @parcel/* runtime dep that is NOT a watcher subpackage.
       await mkdir(join(parcelDir, 'transformer-js'), { recursive: true })
 
-      prunePackagedParcelWatcher(resourcesDir, 'linux')
+      prunePackagedParcelWatcher(resourcesDir, 'linux', 1)
 
       await expect(readdir(parcelDir).then((entries) => entries.sort())).resolves.toEqual([
         'transformer-js',
@@ -622,7 +657,8 @@ describe('electron-builder config', () => {
 
         await electronBuilderConfig.afterPack({
           appOutDir: join(root, 'linux-unpacked'),
-          electronPlatformName: 'linux'
+          electronPlatformName: 'linux',
+          arch: 1
         })
 
         expect((await stat(launcherPath)).mode & 0o111).not.toBe(0)

@@ -346,7 +346,6 @@ describe('isTerminalImeProcessEnter', () => {
 
   it.each([
     { key: 'Enter' },
-    { code: 'ShiftLeft' },
     { keyCode: 13 },
     { shiftKey: false },
     { ctrlKey: true },

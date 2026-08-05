@@ -215,7 +215,7 @@ import {
 } from './components/terminal/background-terminal-worktree-mount'
 import {
   collectTerminalProviderSnapshotPtyIds,
-  synchronizeTerminalProviderSnapshotCapabilities
+  refreshTerminalProviderSnapshotCapabilities
 } from './components/terminal/terminal-provider-snapshot-capability'
 import { useRemoteRuntimeRecoveryTriggers } from './runtime/use-remote-runtime-recovery-triggers'
 
@@ -1081,7 +1081,7 @@ function App(): React.JSX.Element {
             window.api.app.recoverLegacyWorkerTerminalsForRendererStartup()
           )
           await timeRendererStartupStep('terminal-provider-snapshot-capabilities', () => {
-            return synchronizeTerminalProviderSnapshotCapabilities(
+            return refreshTerminalProviderSnapshotCapabilities(
               collectTerminalProviderSnapshotPtyIds(useAppStore.getState())
             )
           })
@@ -1170,6 +1170,9 @@ function App(): React.JSX.Element {
             try {
               await window.api.app.awaitFirstWindowStartupServices()
               await window.api.app.recoverLegacyWorkerTerminalsForRendererStartup()
+              await refreshTerminalProviderSnapshotCapabilities(
+                collectTerminalProviderSnapshotPtyIds(useAppStore.getState())
+              )
               await actions.reconnectPersistedTerminals(abortController.signal)
               await window.api.app.recoverLegacyWorkerTerminalsForRendererStartup()
             } catch (reconnectErr) {

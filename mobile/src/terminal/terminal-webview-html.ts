@@ -4,6 +4,7 @@ import { colors } from '../theme/mobile-theme'
 import { TERMINAL_TEXT_SCALES } from '../storage/preferences'
 import { TERMINAL_SCROLL_COORDINATOR_JS } from './terminal-scroll-coordinator-injected'
 import { TERMINAL_PATH_TAP_JS } from './terminal-path-tap-injected'
+import { TERMINAL_KEYBOARD_AVOIDANCE_METRICS_JS } from './terminal-keyboard-avoidance-metrics-injected'
 import { XTERM_ENGINE_CSS, XTERM_ENGINE_JS } from './terminal-webview-engine.generated'
 import { TERMINAL_REFLOW_JS } from './terminal-webview-reflow-injected'
 import { TERMINAL_SURFACE_SWAP_JS } from './terminal-webview-surface-swap-injected'
@@ -293,6 +294,7 @@ window.onerror = function(msg) {
           generation: terminalGeneration,
           change: { cols: cols, rows: rows, reason: 'font' }
         });
+        emitKeyboardAvoidanceMetrics();
         scrollCoordinator.dispatch({ type: 'viewport-committed', generation: terminalGeneration });
       }
     });
@@ -840,6 +842,7 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
       generation: terminalGeneration,
       change: { cols: cols, rows: rows, reason: 'resize' }
     });
+    emitKeyboardAvoidanceMetrics();
     scrollCoordinator.dispatch({ type: 'viewport-committed', generation: terminalGeneration });
   }
 
@@ -995,6 +998,7 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
       initialOscLinkEvictionReady = false;
       if (term) { term.clear(); term.reset(); }
       emitModesIfChanged();
+      emitKeyboardAvoidanceMetrics();
       resetEvictionCounter();
       if (selMode === 'select') {
         notify({ type: 'selection-evicted' });
@@ -1137,17 +1141,7 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
     sgrMousePixelsMode: false
   };
 
-  function emitKeyboardAvoidanceMetrics() {
-    if (!term) return;
-    var alt = false;
-    try { alt = term.buffer && term.buffer.active && term.buffer.active.type === 'alternate'; } catch (e) {}
-    notify({
-      type: 'keyboard-avoidance-metrics',
-      cursorY: term.buffer && term.buffer.active ? term.buffer.active.cursorY : 0,
-      rows: term.rows || 0,
-      altScreen: alt
-    });
-  }
+  ${TERMINAL_KEYBOARD_AVOIDANCE_METRICS_JS}
 
   function attachTermObservers() {
     if (!term) return;

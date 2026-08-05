@@ -5923,6 +5923,66 @@ describe('OrcaRuntimeService', () => {
     expect(deleteWorktreeHistoryDirMock).toHaveBeenCalledWith(`${TEST_REPO_ID}::/remote/feature`)
   })
 
+  // Regression: `repoId::path` ids repeat across hosts, so the SSH delete's runtime sweep used to
+  // stop the same-id local workspace's terminals too.
+  it('leaves a same-id local terminal running when the SSH copy is removed', async () => {
+    const remoteRepo = {
+      id: TEST_REPO_ID,
+      path: '/remote/repo',
+      displayName: 'repo',
+      badgeColor: 'blue',
+      addedAt: 1,
+      connectionId: 'ssh-1'
+    }
+    const remoteStore = { ...store, getRepos: () => [remoteRepo], getRepo: () => remoteRepo }
+    const gitProvider = {
+      listWorktrees: vi.fn().mockResolvedValue([
+        {
+          path: '/remote/repo',
+          head: 'main',
+          branch: 'refs/heads/main',
+          isBare: false,
+          isMainWorktree: true
+        },
+        {
+          path: '/remote/feature',
+          head: 'abc',
+          branch: 'feature/foo',
+          isBare: false,
+          isMainWorktree: false
+        }
+      ]),
+      removeWorktree: vi.fn().mockResolvedValue(undefined)
+    }
+    registerSshGitProvider('ssh-1', gitProvider as never)
+    const ptyProvider = {
+      listProcesses: vi.fn().mockResolvedValue([]),
+      shutdown: vi.fn().mockResolvedValue(undefined)
+    }
+    const runtime = new OrcaRuntimeService(remoteStore as never, undefined, {
+      getSshProvider: () => ptyProvider as never
+    })
+    const stopAndWait = vi.fn(async () => true)
+    runtime.setPtyController({
+      write: () => true,
+      kill: vi.fn(() => true),
+      stopAndWait,
+      getForegroundProcess: async () => null
+    })
+    syncSinglePty(runtime, null)
+    runtime.registerPty('pty-remote', `${TEST_REPO_ID}::/remote/feature`, 'ssh-1')
+    runtime.registerPty('pty-local-same-id', `${TEST_REPO_ID}::/remote/feature`, null)
+
+    try {
+      await runtime.removeManagedWorktree('path:/remote/feature', true, false)
+    } finally {
+      unregisterSshGitProvider('ssh-1')
+    }
+
+    expect(stopAndWait).toHaveBeenCalledWith('pty-remote', expect.anything())
+    expect(stopAndWait).not.toHaveBeenCalledWith('pty-local-same-id', expect.anything())
+  })
+
   it('rejects SSH-backed runtime removal of the main worktree before provider deletion', async () => {
     const remoteStore = {
       ...store,
@@ -10846,6 +10906,62 @@ describe('OrcaRuntimeService', () => {
       handle: terminal.handle,
       isRunningAgent: true,
       status: 'permission'
+    })
+  })
+
+  it('does not treat a restored-unconfirmed hook row as live terminal status', async () => {
+    const leafId = '11111111-1111-4111-8111-111111111111'
+    const paneKey = makePaneKey('tab-1', leafId)
+    const runtime = new OrcaRuntimeService(store, undefined, {
+      getAgentStatusSnapshot: () => [
+        {
+          paneKey,
+          state: 'waiting',
+          prompt: '',
+          agentType: 'codex',
+          connectionId: null,
+          receivedAt: Date.now(),
+          stateStartedAt: Date.now(),
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          restoredUnconfirmed: true
+        }
+      ]
+    })
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'repo terminal',
+          activeLeafId: leafId,
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId,
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(runtime.getTerminalAgentStatus(terminal.handle)).resolves.toEqual({
+      handle: terminal.handle,
+      isRunningAgent: false,
+      status: null
     })
   })
 
@@ -23064,6 +23180,109 @@ describe('OrcaRuntimeService', () => {
     expect(result.tabs[0]).not.toHaveProperty('launchAgent')
   })
 
+  it('preserves host metadata when terminal.create adopts a stable pane owner', async () => {
+    const adoptStablePane = vi.fn().mockResolvedValue(null)
+    const spawn = vi.fn(async (opts: { adoptedStablePane?: { owner: { handle?: string } } }) =>
+      opts.adoptedStablePane
+        ? {
+            id: 'pty-stable-owner',
+            isReattach: true,
+            stablePaneOwner: {
+              handle: opts.adoptedStablePane.owner.handle!,
+              tabId: 'stable-owner-tab',
+              leafId: HEADLESS_LEAF_ID
+            }
+          }
+        : { id: 'pty-stable-owner' }
+    )
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({
+        ...store.getSettings(),
+        claudeAgentTeamsMode: 'in-process' as const
+      })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore)
+    runtime.setPtyController({
+      adoptStablePane,
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    const first = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'stable-owner-tab',
+      leafId: HEADLESS_LEAF_ID,
+      title: 'Original owner',
+      launchAgent: 'claude'
+    })
+    adoptStablePane.mockResolvedValueOnce({
+      result: { id: 'pty-stable-owner', isReattach: true },
+      owner: {
+        handle: first.handle,
+        tabId: 'stable-owner-tab',
+        leafId: HEADLESS_LEAF_ID,
+        ptyId: 'pty-stable-owner'
+      }
+    })
+
+    const adopted = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'stable-owner-tab',
+      leafId: HEADLESS_LEAF_ID,
+      title: 'Replacement intent',
+      command: "claude 'replacement'",
+      launchAgent: 'claude'
+    })
+    const listed = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+
+    expect(adopted).toMatchObject({
+      handle: first.handle,
+      ptyId: 'pty-stable-owner',
+      title: 'Original owner',
+      isReattach: true
+    })
+    expect(listed.tabs).toEqual([
+      expect.objectContaining({
+        parentTabId: 'stable-owner-tab',
+        title: 'Original owner',
+        launchAgent: 'claude'
+      })
+    ])
+    expect(spawn.mock.calls[1]?.[0]).toMatchObject({
+      command: "claude 'replacement'",
+      adoptedStablePane: expect.anything()
+    })
+    expect(spawn.mock.calls[1]?.[0]).not.toMatchObject({
+      command: expect.stringContaining('--teammate-mode')
+    })
+  })
+
+  it('releases a stable-pane claim when creation aborts before provider spawn', async () => {
+    const releaseClaim = vi.fn()
+    const spawn = vi.fn()
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      claimStablePaneCreate: vi.fn(() => releaseClaim),
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    const abort = new AbortController()
+    abort.abort()
+
+    await expect(
+      runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+        tabId: 'aborted-stable-pane',
+        leafId: HEADLESS_LEAF_ID,
+        signal: abort.signal
+      })
+    ).rejects.toThrow('client_disconnected')
+
+    expect(spawn).not.toHaveBeenCalled()
+    expect(releaseClaim).toHaveBeenCalledOnce()
+  })
+
   it('publishes the hook provider session on a headless mobile tab so native chat can address the transcript', async () => {
     const paneKey = makePaneKey('claude-tab', HEADLESS_LEAF_ID)
     const providerSession = {
@@ -25031,6 +25250,7 @@ describe('OrcaRuntimeService', () => {
         persistHostSessionBinding: true
       })
     )
+    expect(spawn.mock.calls[0]?.[0]).not.toHaveProperty('isNewSession')
     expect(activated.tabs).toEqual([
       expect.objectContaining({
         id: `host-tab::${HEADLESS_LEAF_ID}`,
@@ -25101,6 +25321,7 @@ describe('OrcaRuntimeService', () => {
         tabId: 'host-tab',
         leafId: HEADLESS_LEAF_ID,
         sessionId: expect.stringMatching(/^serve-/),
+        isNewSession: true,
         persistHostSessionBinding: true
       })
     )
@@ -34332,6 +34553,31 @@ describe('OrcaRuntimeService', () => {
       })
     ).resolves.toEqual({ stopped: 0 })
     expect(kill).not.toHaveBeenCalled()
+  })
+
+  it('stops only the owning connection when one worktree id lives on two hosts', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const kill = vi.fn(() => true)
+    runtime.setPtyController({
+      write: () => true,
+      kill,
+      stopAndWait: vi.fn(async () => true),
+      getForegroundProcess: async () => null
+    })
+    syncSinglePty(runtime, null)
+    // The store keeps one `repoId::path` per host, so deleting the SSH copy must leave the
+    // local copy's terminals running — the fence the destructive removal paths now supply.
+    runtime.registerPty('pty-ssh', TEST_WORKTREE_ID, 'ssh-1')
+    runtime.registerPty('pty-local', TEST_WORKTREE_ID, null)
+
+    await expect(
+      runtime.stopTerminalsForWorktree(TEST_WORKTREE_ID, {
+        resolvedWorktreeId: TEST_WORKTREE_ID,
+        resolvedConnectionId: 'ssh-1'
+      })
+    ).resolves.toEqual({ stopped: 1 })
+    expect(kill).toHaveBeenCalledWith('pty-ssh')
+    expect(kill).not.toHaveBeenCalledWith('pty-local')
   })
 
   it('awaits physical PTY stop when destructive teardown supplies shared dedupe', async () => {

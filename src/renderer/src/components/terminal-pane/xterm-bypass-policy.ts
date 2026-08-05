@@ -45,8 +45,6 @@ export type XtermImeKeyboardOptions = {
   candidateKeyGuardActive: boolean
   /** True when the pending-release guard already matched this specific event. */
   pendingCandidateKeyReleaseActive: boolean
-  /** True for the ordinary keyup paired with a tracked Windows IME deletion. */
-  pendingCompositionDeletionReleaseActive?: boolean
   /** True for the narrow Linux path where the IME emits an orphaned letter
    *  keyup but no composition/input events before its candidate digit. */
   linuxOrphanCandidateDigitGuardActive?: boolean
@@ -98,7 +96,6 @@ export function shouldSuppressTerminalImeKeyboardEvent(
     compositionActive,
     candidateKeyGuardActive,
     pendingCandidateKeyReleaseActive,
-    pendingCompositionDeletionReleaseActive = false,
     linuxOrphanCandidateDigitGuardActive = false,
     isMac,
     isLinux
@@ -110,9 +107,6 @@ export function shouldSuppressTerminalImeKeyboardEvent(
     (pendingCandidateKeyReleaseActive ||
       (candidateKeyGuardActive && isTerminalImeCandidateSelectionKeyEvent(event)) ||
       suppressOrphanCandidateDigit)
-  if (pendingCompositionDeletionReleaseActive) {
-    return true
-  }
   if (event.type === 'keypress') {
     // Why: a suppressed candidate keydown is not preventDefault-ed by xterm,
     // so its native keypress still fires and _keyPress would forward the
@@ -120,17 +114,6 @@ export function shouldSuppressTerminalImeKeyboardEvent(
     return suppressCandidateKey
   }
   if (!isXtermHandledKeyEvent(event.type)) {
-    return false
-  }
-  const isTrackedCompositionDeletion =
-    event.type === 'keydown' &&
-    compositionActive &&
-    event.keyCode === 229 &&
-    (event.key === 'Backspace' ||
-      event.key === 'Delete' ||
-      event.code === 'Backspace' ||
-      event.code === 'Delete')
-  if (isTrackedCompositionDeletion) {
     return false
   }
   // Why: IMEs own Process-key / composing keystrokes — letting xterm translate

@@ -27,6 +27,9 @@ import type { VerifyAndAddRuntimeEnvironmentResult } from '../shared/remote-pair
 import type {
   SshMutationExpectation,
   SshConnectionState,
+  SshConfigHostListArgs,
+  SshConfigHostListResult,
+  SshConfigHostResolution,
   SshConfigImportResult,
   SshTargetAddResult,
   SshTarget,
@@ -287,6 +290,17 @@ import {
   registerRendererRestartIpcRelays
 } from './renderer-restart-wiring'
 
+// Why: the sync checkpoint only stages; this joins its durable write so a
+// navigating path can abort instead of losing the staged session.
+async function awaitBeforeUnloadCheckpoint(): Promise<void> {
+  const result = (await ipcRenderer.invoke('app:await-before-unload-checkpoint')) as {
+    ok?: unknown
+  }
+  if (result?.ok !== true) {
+    throw new Error('Failed to persist renderer state before unload.')
+  }
+}
+
 type NativeFileDropCallback = (data: NativeFileDropPayload) => void
 
 const nativeFileDropCallbacks: NativeFileDropCallback[] = []
@@ -476,7 +490,8 @@ const api = {
     restart: async (): Promise<void> => {
       await prepareRendererForAppRestart(window, {
         startedEventName: ORCA_APP_RESTART_STARTED_EVENT,
-        abortedEventName: ORCA_APP_RESTART_ABORTED_EVENT
+        abortedEventName: ORCA_APP_RESTART_ABORTED_EVENT,
+        awaitCheckpoint: awaitBeforeUnloadCheckpoint
       })
       try {
         return await ipcRenderer.invoke('app:restart')
@@ -2436,6 +2451,17 @@ const api = {
       webContentsId: number
     }): Promise<boolean> => ipcRenderer.invoke('browser:registerGuest', args),
 
+    isGuestRegistered: (args: { browserPageId: string; webContentsId: number }): Promise<boolean> =>
+      ipcRenderer.invoke('browser:isGuestRegistered', args),
+
+    repairGuestRegistration: (args: {
+      browserPageId: string
+      workspaceId: string
+      worktreeId: string
+      sessionProfileId?: string | null
+      webContentsId: number
+    }): Promise<boolean> => ipcRenderer.invoke('browser:repairGuestRegistration', args),
+
     unregisterGuest: (args: { browserPageId: string }): Promise<void> =>
       ipcRenderer.invoke('browser:unregisterGuest', args),
 
@@ -2960,8 +2986,11 @@ const api = {
     showLinuxPackage: () => ipcRenderer.invoke('updater:showLinuxPackage'),
     listBuilds: (channel) => ipcRenderer.invoke('updater:listBuilds', channel),
     quitAndInstall: (): Promise<void> =>
-      prepareAndInvokeUpdaterInstall(window, updaterQuitAbortRelay, () =>
-        ipcRenderer.invoke('updater:quitAndInstall')
+      prepareAndInvokeUpdaterInstall(
+        window,
+        updaterQuitAbortRelay,
+        () => ipcRenderer.invoke('updater:quitAndInstall'),
+        awaitBeforeUnloadCheckpoint
       ),
 
     onStatus: (callback) => {
@@ -4153,6 +4182,8 @@ const api = {
   aiVault: {
     listSessions: (args?: AiVaultListArgs): Promise<unknown> =>
       ipcRenderer.invoke('aiVault:listSessions', args),
+    cancelListSessions: (args: { requestToken: string }): Promise<void> =>
+      ipcRenderer.invoke('aiVault:cancelListSessions', args),
     prepareSessionResume: (args: AiVaultPrepareSessionResumeArgs): Promise<unknown> =>
       ipcRenderer.invoke('aiVault:prepareSessionResume', args),
     listSubagentSessions: (args: AiVaultSubagentListArgs): Promise<unknown> =>
@@ -4399,6 +4430,12 @@ const api = {
     importConfig: (args?: { reAdopt?: boolean }): Promise<SshConfigImportResult> =>
       ipcRenderer.invoke('ssh:importConfig', args),
 
+    listConfigHosts: (args?: SshConfigHostListArgs): Promise<SshConfigHostListResult> =>
+      ipcRenderer.invoke('ssh:listConfigHosts', args),
+
+    resolveConfigHost: (args: { alias: string }): Promise<SshConfigHostResolution | null> =>
+      ipcRenderer.invoke('ssh:resolveConfigHost', args),
+
     connect: async (args: { targetId: string }): Promise<SshConnectionState | null> => {
       const state: unknown = await ipcRenderer.invoke('ssh:connect', args)
       return state ? admitSshConnectionStateForAuthorityReconciliation(state, args.targetId) : null
@@ -4618,7 +4655,7 @@ const api = {
       address?: string
       rotate?: boolean
     }): Promise<
-      | { available: false }
+      | { available: false; reason?: 'network_exposure_failed'; guidance?: string }
       | {
           available: true
           pairingUrl: string
