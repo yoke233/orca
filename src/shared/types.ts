@@ -1026,6 +1026,12 @@ export type BrowserTab = BrowserWorkspace
 
 export type BrowserSessionProfileScope = 'default' | 'isolated' | 'imported'
 
+export type BrowserSessionUserAgentMode = 'clean' | 'native'
+
+export type BrowserSessionProfileCreateOptions = {
+  userAgentMode?: BrowserSessionUserAgentMode
+}
+
 export type BrowserSessionProfileSource = {
   browserFamily:
     | 'chrome'
@@ -1047,6 +1053,7 @@ export type BrowserSessionProfile = {
   partition: string
   label: string
   source: BrowserSessionProfileSource | null
+  userAgentMode?: BrowserSessionUserAgentMode
 }
 
 export type BrowserCookieImportSummary = {
@@ -1408,6 +1415,9 @@ export type PRCheckDetail = {
   url: string | null
   checkRunId?: number
   workflowRunId?: number
+  // Why: the GitLab job trace API is addressed by numeric job id only, so the
+  // Checks panel cannot load a job log without carrying it on the row.
+  gitlabJobId?: number
 }
 
 export type PRCheckAnnotation = {
@@ -3393,6 +3403,8 @@ export type PersistedUIState = {
   hideCliCreatedWorkspaces?: boolean
   /** Hide workspaces sitting on a detached HEAD; folder workspaces (no head at all) are unaffected. */
   hideDetachedHeadWorkspaces?: boolean
+  /** Keep each project's main workspace out of the "Hide sleeping" sweep. Absent means on (#8873). */
+  alwaysShowDefaultBranchWorkspace?: boolean
   /** Per-worktree Explorer dotfile visibility. Missing entries inherit the default: show. */
   showDotfilesByWorktree?: Record<string, boolean>
   filterRepoIds: string[]

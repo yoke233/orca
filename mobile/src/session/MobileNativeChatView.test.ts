@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { MobileNativeChatView } from './MobileNativeChatView'
 
 vi.mock('react-native', () => ({
@@ -15,11 +16,6 @@ vi.mock('react-native', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 })
 }))
-vi.mock('../localization/mobile-locale-provider', async () => {
-  const { english } = await import('../localization/catalogs/en')
-  return { useMobileLocale: () => ({ t: (key: keyof typeof english) => english[key] }) }
-})
-
 vi.mock('../localization/mobile-locale-provider', () => ({
   useMobileLocale: () => ({ t: (key: string) => key })
 }))
@@ -66,6 +62,9 @@ vi.mock('./MobileNativeChatComposer', async () => {
 })
 
 type Overrides = {
+  messages?: Parameters<typeof MobileNativeChatView>[0]['messages']
+  folded?: Parameters<typeof MobileNativeChatView>[0]['folded']
+  streaming?: string | null
   sendErrorMessage?: string | null
   onClearSendError?: () => void
   inputLockReason?: 'disconnected' | 'waiting' | null
@@ -83,37 +82,64 @@ function suppressRendererWarning(): () => void {
   return () => spy.mockRestore()
 }
 
-describe('MobileNativeChatView send-error banner', () => {
+function assistantTurn(id: string, text: string): NativeChatMessage {
+  return { id, role: 'assistant', blocks: [{ type: 'text', text }], timestamp: 0, source: 'hook' }
+}
+
+function chatViewElement(overrides: Overrides): ReturnType<typeof createElement> {
+  return createElement(MobileNativeChatView, {
+    sessionKey: 'session-1',
+    messages: [],
+    folded: [],
+    status: 'ready',
+    streaming: null,
+    onSend: vi.fn().mockResolvedValue(true),
+    pending: [],
+    composerText: '',
+    onComposerTextChange: vi.fn(),
+    ...overrides
+  })
+}
+
+describe('MobileNativeChatView', () => {
   let renderer: ReactTestRenderer | null = null
 
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(Date.now())
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
   })
 
   afterEach(() => {
     act(() => renderer?.unmount())
     renderer = null
+    vi.unstubAllGlobals()
   })
 
   async function render(overrides: Overrides = {}): Promise<void> {
     const restore = suppressRendererWarning()
     try {
       await act(async () => {
-        renderer = create(
-          createElement(MobileNativeChatView, {
-            messages: [],
-            status: 'ready',
-            onSend: overrides.onSend ?? vi.fn().mockResolvedValue(true),
-            pending: [],
-            composerText: '',
-            onComposerTextChange: vi.fn(),
-            ...overrides
-          })
-        )
+        renderer = create(chatViewElement(overrides))
       })
     } finally {
       restore()
     }
+  }
+
+  async function update(overrides: Overrides = {}): Promise<void> {
+    await act(async () => {
+      renderer?.update(chatViewElement(overrides))
+    })
+  }
+
+  /** Ids of the rows the list is currently rendering. */
+  function listIds(): string[] {
+    const list = renderer!.root.find((node) => node.type === 'FlatList')
+    return (list.props.data as { id: string }[]).map((row) => row.id)
   }
 
   function banners(): ReactTestInstance[] {
@@ -168,5 +194,17 @@ describe('MobileNativeChatView send-error banner', () => {
     await pressSend()
 
     expect(onClearSendError).toHaveBeenCalledOnce()
+  })
+
+  // The gate that decides `streaming` lives in MobileNativeChatOverlay, which
+  // outlives this view; see MobileNativeChatOverlay.test.ts.
+  it('appends the gated streaming bubble after the folded transcript', async () => {
+    const folded = [assistantTurn('a1', 'The tests pass.')]
+    await render({ folded })
+    expect(listIds()).toEqual(['a1'])
+
+    await update({ folded, streaming: 'The tests' })
+
+    expect(listIds()).toEqual(['a1', 'streaming'])
   })
 })

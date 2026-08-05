@@ -2,6 +2,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import { foldMobileNativeChatMessages } from './mobile-native-chat-render-data'
 
 const list = vi.hoisted(() => ({
   scrollToEnd: vi.fn(),
@@ -92,16 +93,18 @@ function viewProps(
     onSend?: (text: string) => Promise<boolean>
   } = {}
 ) {
+  const messages = args.messages ?? [MESSAGE]
   return {
     sessionKey: args.sessionKey ?? 'session-1',
-    messages: args.messages ?? [MESSAGE],
+    messages,
+    folded: foldMobileNativeChatMessages(messages),
+    streaming: args.streamingText ?? null,
     status: 'ready' as const,
     onSend: args.onSend ?? vi.fn().mockResolvedValue(true),
     pending: [],
     composerText: '',
     onComposerTextChange: vi.fn(),
     keyboardInset: args.keyboardInset ?? 0,
-    streamingText: args.streamingText,
     agentWorking: args.agentWorking
   }
 }

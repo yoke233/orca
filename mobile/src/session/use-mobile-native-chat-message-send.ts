@@ -1,4 +1,4 @@
-import { useCallback, type RefObject } from 'react'
+import { useCallback, type MutableRefObject } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import { canRetryMobileNativeChatSend } from './mobile-native-chat-input-recovery'
 import {
@@ -8,7 +8,11 @@ import {
   type MobileNativeChatSendOutcome
 } from './mobile-native-chat-send'
 import { healMobileNativeChatStaleInput } from './mobile-native-chat-stale-input'
-import type { MobileNativeChatSendOrigin } from './mobile-native-chat-draft-contract'
+import {
+  acquireMobileNativeChatTerminalWrite,
+  releaseMobileNativeChatTerminalWrite
+} from './mobile-native-chat-terminal-write-lock'
+import type { MobileNativeChatSendOrigin } from './use-mobile-native-chat-drafts'
 import type { MobileNativeChatLaunchDraftSeed } from './use-mobile-native-chat-launch-draft-seed'
 import { buildAgentTuiClearInputForText } from '../../../src/shared/agent-tui-input-clear'
 
@@ -33,9 +37,9 @@ export type MobileNativeChatMessageSend = {
 export function useMobileNativeChatMessageSend(args: {
   client: RpcClient | null
   enabled: boolean
-  handleRef: RefObject<string | null>
-  activeSessionTabIdRef: RefObject<string | null>
-  deviceTokenRef: RefObject<string | null>
+  handleRef: MutableRefObject<string | null>
+  deviceTokenRef: MutableRefObject<string | null>
+  activeSessionTabIdRef: MutableRefObject<string | null>
   recoverInputLease: (
     rejectedHandle: string,
     expectedSessionTabId: string | null
@@ -58,8 +62,8 @@ export function useMobileNativeChatMessageSend(args: {
     client,
     enabled,
     handleRef,
-    activeSessionTabIdRef,
     deviceTokenRef,
+    activeSessionTabIdRef,
     recoverInputLease,
     captureSendOrigin,
     readSeededLaunchDraftSeed,
@@ -146,8 +150,17 @@ export function useMobileNativeChatMessageSend(args: {
           client,
           terminal,
           text,
-          // A dedicated clear already emptied a seeded draft. Image sends cleared
-          // before pasting and would lose the image if cleared again.
+          // Why: pre-clear only when nothing was deliberately pasted first. The heal
+          // above fires only for terminals a mobile image paste marked, so a desktop
+          // launch-draft prefill parked on the input line would otherwise glue onto
+          // this message. An image send already led its own paste with Ctrl+U, and a
+          // second one here would wipe the image it just pasted (desktop's image path
+          // likewise clears once, before the paste, and never again).
+          //
+          // Also skipped once the dedicated clear above ran: the line is already
+          // empty, and a Ctrl+U written immediately before body text in the SAME
+          // write reaches the agent as a literal control character rather than a
+          // keypress (observed live as a stray \x15 heading the received message).
           clearInputFirst: !images?.length && !seededLaunchDraft,
           ...(syncComposer && typeof seededLaunchDraft?.createdAt === 'number'
             ? {
@@ -228,11 +241,26 @@ export function useMobileNativeChatMessageSend(args: {
     [sendWithOutcome]
   )
 
-  // A question answer is not composer text, so it never syncs the draft.
+  // A question answer is not composer text, so it never syncs the draft. It
+  // reaches this send directly (not through the image hook's locked path), so
+  // it takes the per-terminal write lock itself: an answer landing mid-flight
+  // in an image paste sequence would interleave bytes into the PTY.
   const answerQuestion = useCallback(
-    async (text: string): Promise<boolean> =>
-      (await sendMessage(text, undefined, false)) !== 'rejected',
-    [sendMessage]
+    async (text: string): Promise<boolean> => {
+      const terminal = handleRef.current
+      if (terminal && !acquireMobileNativeChatTerminalWrite(terminal)) {
+        onSendError('Answer not sent')
+        return false
+      }
+      try {
+        return (await sendMessage(text, undefined, false)) !== 'rejected'
+      } finally {
+        if (terminal) {
+          releaseMobileNativeChatTerminalWrite(terminal)
+        }
+      }
+    },
+    [handleRef, onSendError, sendMessage]
   )
 
   return { send, sendWithOutcome, answerQuestion }

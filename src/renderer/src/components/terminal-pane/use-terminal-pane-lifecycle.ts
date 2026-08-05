@@ -1664,7 +1664,8 @@ export function useTerminalPaneLifecycle({
         manager: mgr,
         getPtyIdForLeaf: (leafId) =>
           useAppStore.getState().terminalLayoutsByTabId[tabId]?.ptyIdsByLeafId?.[leafId],
-        closeTab: () => closeTerminalTab(tabId),
+        // Why: CLI-driven pane close; its caller is answered immediately and cannot wait on a modal.
+        closeTab: () => closeTerminalTab(tabId, { skipRunningProcessConfirm: true }),
         closeTabPreservingPty: () => {
           const store = useAppStore.getState()
           if (detail.retireSurface && detail.leafId) {

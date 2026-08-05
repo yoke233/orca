@@ -15,7 +15,10 @@ import { useMobileNativeChatUnconfirmedSend } from './use-mobile-native-chat-unc
 import { useMobileNativeChatLaunchDraftSeed } from './use-mobile-native-chat-launch-draft-seed'
 import type { MobileNativeChatLaunchDraftSeed } from './use-mobile-native-chat-launch-draft-seed'
 
-export type { MobileNativeChatPendingMessage } from './mobile-native-chat-draft-contract'
+export type {
+  MobileNativeChatPendingMessage,
+  MobileNativeChatSendOrigin
+} from './mobile-native-chat-draft-contract'
 
 export function useMobileNativeChatDrafts(args: {
   hostId: string

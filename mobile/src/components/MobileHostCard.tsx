@@ -6,6 +6,7 @@ import type { ConnectionState, HostProfile } from '../transport/types'
 import { colors, radii, spacing } from '../theme/mobile-theme'
 import { useMobileLocale } from '../localization/mobile-locale-provider'
 import type { TranslationKey } from '../localization/mobile-locale'
+import { homeHostWorktreeSummary, type HostWorktreeInfo } from '../worktree/home-worktree-info'
 import { StatusDot } from './StatusDot'
 
 function connectionStatusKey(state: ConnectionState, verdict: ConnectionVerdict): TranslationKey {
@@ -32,8 +33,9 @@ export function MobileHostCard(props: {
   state: ConnectionState
   verdict: ConnectionVerdict
   path: MobileConnectionPath
-  worktreeCounts?: { total: number; active: number }
-  worktreeCountsUnavailable?: boolean
+  // Why: the card owns the fresh/stale/unavailable wording so no caller can re-gate the counts
+  // away (STA-3123 shipped that bug once already).
+  worktreeInfo?: HostWorktreeInfo
   onPress: () => void
   onLongPress: () => void
 }) {
@@ -55,17 +57,12 @@ export function MobileHostCard(props: {
       : props.path === 'tailscale'
         ? t('host.pathTailscale')
         : t('host.pathLan')
-  const worktreeSummary = props.worktreeCounts
-    ? `${t(props.worktreeCounts.total === 1 ? 'host.worktreeOne' : 'host.worktreeMany', {
-        count: props.worktreeCounts.total
-      })}${
-        props.worktreeCounts.active > 0
-          ? t('host.activeWorktrees', { count: props.worktreeCounts.active })
-          : ''
-      }`
-    : props.worktreeCountsUnavailable
-      ? t('host.worktreeListUnavailable')
-      : null
+  const worktreeSummary = homeHostWorktreeSummary(props.worktreeInfo, Date.now(), {
+    unavailable: t('host.worktreeListUnavailable'),
+    worktrees: (count) => t(count === 1 ? 'host.worktreeOne' : 'host.worktreeMany', { count }),
+    active: (count) => t('host.activeWorktrees', { count }),
+    lastKnown: (summary) => t('host.lastKnownWorktrees', { summary })
+  })
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}

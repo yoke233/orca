@@ -11,6 +11,101 @@
   },
   "gates": [
     {
+      "id": "editor.restored-sibling-owner-reparent",
+      "title": "Restored sibling tabs migrate filesystem authority before becoming editable",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "editor-runtime",
+      "layer": "renderer-store-controller-contract",
+      "surfaces": [
+        "restored editor tabs",
+        "editor save and autosave",
+        "filesystem watches and hot-exit persistence"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "ssh", "paired-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "ssh", "paired-runtime"],
+      "coverageNotes": "Deterministic store/controller tests cover local, direct-SSH, paired-runtime identity, folder workspaces, queue quiescence, stale route and connection-generation rejection, authoritative active-workspace projection, owner-derived IDs, drafts and editor maps, tab/group placement, exact watch replacement, change/delete/rename correlation, explicit save, autosave, collision refusal without activation reconciliation, provenance, and restart hot-exit persistence. Live headed/headless paired-runtime and post-establish Electron IPC remain uncollected.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/11304",
+        "https://github.com/stablyai/orca/pull/11369"
+      ],
+      "invariant": "A restored absolute path owned by a same-host sibling workspace cannot read, save, watch, or persist until old saves drain, the exact route and host generations are revalidated, and one authoritative activation transaction installs the sibling owner, target projection, editor state, reconciliation, and first-activation terminal preparation; collisions and stale routes fail before activation preparation or reconciliation.",
+      "oracle": "Hold an old-owner save in flight, start migration, then remove the sibling, change a folder root, or reconnect SSH and require owner migration to fail closed after quiescence. On a stable route require one coherent target-workspace projection, first-activation terminal generation preparation, destination authority for explicit save and autosave, exact watch replacement, destination-only change/delete/rename handling, owner-derived state rekeys, and hot-exit restart ownership. Seed an invalid destination tab/group model before a collision and require the target projection to remain byte-identical.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/restored-editor-owner-reparent.test.ts src/renderer/src/components/editor/restored-editor-owner-save-lifecycle.test.ts src/renderer/src/lib/runtime-workspace-file-route.test.ts"
+      ],
+      "testFiles": [
+        "src/renderer/src/store/slices/restored-editor-owner-reparent.test.ts",
+        "src/renderer/src/components/editor/restored-editor-owner-save-lifecycle.test.ts",
+        "src/renderer/src/lib/runtime-workspace-file-route.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/store/slices/restored-editor-owner-reparent.test.ts",
+          "assertions": [
+            "one atomic commit rekeys owner-derived editor, preview, draft, cursor, view, tab, group, active, reveal, focus, provenance, and persistence state",
+            "active reparenting uses the centralized workspace activation transaction for terminal, browser, pending-creation, explorer, first-activation, and post-commit state",
+            "source watch unsubscribes once, destination watch subscribes once, and only destination change/delete/rename events reach the file",
+            "dirty and clean destination collisions fail closed without changing either open session or reconciling destination tabs and groups",
+            "folder and direct-SSH owners retain exact root, host, target, and connection-generation authority"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/editor/restored-editor-owner-save-lifecycle.test.ts",
+          "assertions": [
+            "migration waits for the old save queue and routes later explicit and automatic saves through the destination worktree",
+            "a removed sibling, changed folder root, or changed direct-SSH generation after quiescence rejects migration without changing ownership"
+          ]
+        },
+        {
+          "file": "src/renderer/src/lib/runtime-workspace-file-route.test.ts",
+          "assertions": [
+            "same-host runtime, folder, local, and direct-SSH roots resolve without cross-host fallback"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-03",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/store/slices/restored-editor-owner-reparent.test.ts src/renderer/src/components/editor/restored-editor-owner-save-lifecycle.test.ts src/renderer/src/lib/runtime-workspace-file-route.test.ts",
+          "result": "passed",
+          "durationSeconds": 3,
+          "summary": "Three deterministic files passed 20 lifecycle, stale-route, activation, ownership, host, collision, persistence, watch, and save tests."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 5,
+        "scope": "focused renderer store/controller contract on a local development runner"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "One local deterministic run is recorded; CI and soak history have not started."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The final2 verifier's byte-identical post-quiescence lifecycle scope passed 21/21 on 7890271160 and failed 7 tests on f92db196a1; base e08eba674c, published 1bcfe3bcb0, and revert b3627461ab were structurally red. The permanent collision oracle is in test blob ac62a89c671a0c8f081ebf06736715bd2150ce9f (SHA-256 a61970ace80be1cb56f781aee6f878a8446c6c4527f9eb0cd0c151d8df96bf50). The same byte-identical blob is structurally red on base, published, and revert, behaviorally red on rejected final2 candidate 7890271160 because pre-commit reconciliation removes the stale destination tab, and green on implementation b72a838cdc; the full permanent gate passes 20/20."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Route lookup scans only the already-indexed renderer workspace catalog, while migration is O(open editor files + source/destination tabs/groups) and performs no provider call, Git scan, polling, retry, subprocess, or global fanout beyond the required old/new watch delta."
+      },
+      "promotionCriteria": [
+        "Collect two fresh child-verifier decisions against the correction candidate.",
+        "Collect headed and headless paired-runtime coverage after the post-establish Electron IPC gap is fixed.",
+        "Collect physical Windows or WSL path/host evidence and CI soak history."
+      ],
+      "knownGaps": [
+        "Headed Electron post-establish IPC, paired headless, reconnect, and physical Windows/WSL journeys are uncollected.",
+        "Cold many-repo main-process sibling discovery remains a separately measured follow-up.",
+        "Registered-workspace symlink policy remains inherited and unchanged."
+      ],
+      "demotionRule": "Keep experimental or demote if migration can race a save, retain source authority, fan out watches, lose dirty/editor state, accept an owner-generation change, merge a collision, or the focused contract flakes without a product or harness bug."
+    },
+    {
       "id": "terminal-provider.login-session-retirement",
       "title": "macOS login-session retirement preserves live daemons through transient rejection bursts",
       "maturity": "experimental",
@@ -2244,6 +2339,120 @@
       "demotionRule": "Demote or quarantine if the gate flakes without a product or harness bug, if a Pi handler can again await receiver I/O, or if coalescing allows an older status to overwrite a newer one."
     },
     {
+      "id": "agent-status.manual-compact-identity",
+      "title": "Manual Claude compact completion retires only its exact status generation",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "agent-session",
+      "layer": "shared-main-relay-contract",
+      "surfaces": [
+        "Claude status hooks",
+        "manual compact lifecycle",
+        "last-status persistence",
+        "SSH relay ingest"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "ssh"],
+      "coverageNotes": "Deterministic listener, loopback HTTP, relay-restart, persisted-restore, and fake-SSH transport contracts run on macOS. Claude Code 2.1.220 captures prove manual PreCompact starts a new prompt UUID and exact PreCompact/PostCompact pairs share it. The shared Node paths are platform-independent; live Linux, Windows, WSL, and paired-runtime journeys remain gaps.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/11352",
+        "https://github.com/stablyai/orca/pull/11353"
+      ],
+      "invariant": "A Claude manual PreCompact may replace only a current Claude row from the same receiving connection and provider session; a manual PostCompact may mark done only when the current authoritative row is its exact manual PreCompact generation, including provider prompt UUID. Missing identity is never a wildcard; later cross-provider work, replay, duplication, pane or tab retirement, and server stop invalidate completion. Automatic Claude and Kimi completion remain fail-closed until their hooks expose independently proven generation identity.",
+      "oracle": "Run one byte-identical state-machine oracle plus local HTTP, relay-restart, SSH, and persisted-restore streams using Claude's observed different prior-turn and compact prompt UUIDs. Require matching manual completion to emit done while wrong or absent prompt UUID, session-presence mismatch, wrong source or connection, stale replay and duplicate delivery, later Codex work, automatic completion, and lifecycle cleanup cannot retire the current row. Assert both emitted event order and the authoritative lastStatusByPaneKey snapshot.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/manual-compact-prompt-identity.test.ts src/main/agent-hooks/manual-compact-hook-stream.test.ts src/main/agent-hooks/manual-compact-status-cleanup.test.ts src/shared/agent-hook-listener.test.ts src/shared/agent-hook-relay.test.ts src/relay/agent-hook-server.test.ts src/main/agent-hooks/server.test.ts src/main/ssh/ssh-relay-session-agent-hooks.integration.test.ts --reporter=dot",
+        "Manual Claude Code 2.1.220 interactive compact: isolate UserPromptSubmit, PreCompact, and PostCompact hooks; submit one ordinary prompt then /compact; compare source, trigger, session_id, and prompt_id"
+      ],
+      "testFiles": [
+        "src/shared/manual-compact-prompt-identity.test.ts",
+        "src/main/agent-hooks/manual-compact-hook-stream.test.ts",
+        "src/main/agent-hooks/manual-compact-status-cleanup.test.ts",
+        "src/shared/agent-hook-listener.test.ts",
+        "src/shared/agent-hook-relay.test.ts",
+        "src/relay/agent-hook-server.test.ts",
+        "src/main/agent-hooks/server.test.ts",
+        "src/main/ssh/ssh-relay-session-agent-hooks.integration.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/shared/manual-compact-prompt-identity.test.ts",
+          "assertions": [
+            "matching manual identity settles once",
+            "stale, duplicate, session-mismatched, malformed, automatic, and unproven provider completion fail closed",
+            "4,097 rejected pane keys allocate no ownership state"
+          ]
+        },
+        {
+          "file": "src/main/agent-hooks/manual-compact-hook-stream.test.ts",
+          "assertions": [
+            "local HTTP and relay-restart streams preserve the distinct prior-turn and compact prompt identities",
+            "later provider work and wrong transport identity remain authoritative",
+            "persisted PreCompact restores its prompt"
+          ]
+        },
+        {
+          "file": "src/main/agent-hooks/manual-compact-status-cleanup.test.ts",
+          "assertions": ["pane, tab, and server cleanup revoke compact completion authority"]
+        },
+        {
+          "file": "src/main/ssh/ssh-relay-session-agent-hooks.integration.test.ts",
+          "assertions": [
+            "SSH stamps the receiving connection and forwards source, prompt UUID, session, and manual trigger"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-02",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/manual-compact-prompt-identity.test.ts src/main/agent-hooks/manual-compact-hook-stream.test.ts src/main/agent-hooks/manual-compact-status-cleanup.test.ts src/shared/agent-hook-listener.test.ts src/shared/agent-hook-relay.test.ts src/relay/agent-hook-server.test.ts src/main/agent-hooks/server.test.ts src/main/ssh/ssh-relay-session-agent-hooks.integration.test.ts --reporter=dot",
+          "result": "passed",
+          "durationSeconds": 2.66,
+          "summary": "Eight focused files and 435 tests passed with local HTTP, relay, SSH, persistence, adversarial identity, cleanup, and existing provider-regression coverage."
+        },
+        {
+          "date": "2026-08-02",
+          "runner": "manual",
+          "platform": "macos",
+          "command": "Manual Claude Code 2.1.220 interactive compact: isolate UserPromptSubmit, PreCompact, and PostCompact hooks; submit one ordinary prompt then /compact; compare source, trigger, session_id, and prompt_id",
+          "result": "passed",
+          "durationSeconds": 120,
+          "summary": "A fresh capture proved /compact emits no UserPromptSubmit and its PreCompact uses a new UUID distinct from the preceding user turn; the preserved authenticated capture proved the matching manual PreCompact and PostCompact share that UUID and session. Automatic capture reused one prompt UUID across multiple compact generations, so automatic completion remains disabled."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 20,
+        "scope": "shared, main-process, relay, persistence, and fake-SSH contract tests"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "New deterministic gate with one local run; CI soak history is not yet available."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The byte-identical oracle (SHA-256 24e80c15b467ffa9c47a81099f11bf26dea71293e47b5d950b2fad1497094764) failed 5 of 6 on origin/main@a20165a43d, passed 6 of 6 on the candidate, failed 3 of 6 when only the exact-transition guard was disabled, and passed 6 of 6 after restoration."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Each compact event performs one O(1) current-status lookup plus bounded UUID, source, connection, session, and event comparisons. Identity lives on the existing status row and is removed by its existing lifecycle; the change adds no owner map, global scan, polling, timer, subprocess, network request, or listener. The 4,097-key adversarial arm retains zero status, prompt, or ownership entries."
+      },
+      "promotionCriteria": [
+        "Collect 100 consecutive focused CI passes or 14 days of soak history.",
+        "Run live manual compact journeys on Linux and Windows and through a real SSH target.",
+        "Keep automatic compact completion disabled until a generation-unique provider identity is proven."
+      ],
+      "knownGaps": [
+        "No live Linux, Windows, WSL, paired-runtime, or real-SSH manual compact journey was run.",
+        "Claude versions before prompt_id support intentionally cannot complete a manual compact row through PostCompact.",
+        "Automatic Claude and Kimi completion remain intentionally fail-closed because their hooks do not prove an exact compact generation."
+      ],
+      "demotionRule": "Demote or quarantine if identity-mismatched completion can retire newer work, cleanup retains compact authority, or the focused gate flakes without a product or harness bug."
+    },
+    {
       "id": "agent-session.provider-ownership",
       "title": "Provider sessions are resumed once per workspace ownership claim",
       "maturity": "experimental",
@@ -4226,7 +4435,7 @@
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": [],
-      "coverageNotes": "Platform-neutral unit coverage proves the Resource Manager closed badge performs one readiness seed, coalesces unknown spawn signals, skips known-session reattach signals, and installs no interval. Broader terminal interaction coverage remains on the pending reliability stack.",
+      "coverageNotes": "Platform-neutral unit coverage proves the Resource Manager closed badge performs one readiness seed, coalesces unknown spawn signals, skips known-session reattach signals, installs no interval, and re-reads only once per explicit daemon-management kill/restart (which emits no pty:exit). Broader terminal interaction coverage remains on the pending reliability stack.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/pull/7002",
         "https://github.com/stablyai/orca/pull/6858",
@@ -4255,7 +4464,8 @@
             "spawn signals during a slow inventory read never overlap provider-wide scans and cause at most one required follow-up",
             "unknown sessions that exit before reconciliation cancel their queued inventory read",
             "unmount during a slow inventory read cannot schedule follow-up work",
-            "exit and out-of-order refresh races cannot resurrect stale sessions"
+            "exit and out-of-order refresh races cannot resurrect stale sessions",
+            "an explicit daemon-management invalidation performs exactly one inventory read, and none before readiness or after unmount"
           ]
         },
         {
@@ -6646,15 +6856,16 @@
       "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos"],
       "coveredProviders": ["local", "daemon", "ssh"],
-      "coverageNotes": "A deterministic service-state-machine oracle now models a current-contract worker and coordinator whose renderer graph identities disappear across an app/runtime update. It exercises the production verifier with restored PTY and hydrated hook commitments, proves authenticated completion replay across a fresh runtime, explicit takeover, ordinary mail routing, remote-attachment process fencing, retained Task/Dispatch/terminal identity, and unchanged fixture marker bytes, and rejects foreign pane evidence. Other deterministic units cover authority-aware legacy formatting, exact legacy worker identity planning, local worker presentation, retained-output reads after adoption, reveal-failure warnings, stable-pane Run/Dispatch routing, the SSH in-process CLI fallback, and federated non-reveal. Two isolated macOS Electron journeys launch fake Codex workers through the real RPC path and record append-only spawn/interruption ledgers. They assert immediate inactive presentation, one live agent PID, stable PTY/incarnation/tab/leaf/worktree/Task/Dispatch identity, and no interruption after workspace re-entry; the restart journey additionally removes renderer ownership, marks the Dispatch legacy, retains the daemon process across an app restart, and proves exact background adoption with readable ACK output and no resume replay. Distinct A/B artifacts plus live SSH, WSL, folder, remote-runtime, Linux, and Windows cutover journeys remain explicit gaps.",
+      "coverageNotes": "A deterministic service-state-machine oracle now models a current-contract worker and coordinator whose renderer graph identities disappear across an app/runtime update. It exercises the production verifier with restored PTY and hydrated hook commitments, proves authenticated completion replay across a fresh runtime, explicit takeover, ordinary mail routing, remote-attachment process fencing, retained Task/Dispatch/terminal identity, and unchanged fixture marker bytes, and rejects foreign pane evidence. Other deterministic units cover authority-aware legacy formatting, exact legacy worker identity planning, local worker presentation, retained-output reads after adoption, reveal-failure warnings, stable-pane Run/Dispatch routing, creator pane/process/Run-generation fencing, indexed retained-Run lookup scaling, the SSH in-process CLI fallback, and federated non-reveal. Two isolated macOS Electron journeys launch fake Codex workers through the real RPC path and record append-only spawn/interruption ledgers. They assert immediate inactive presentation, one live agent PID, stable PTY/incarnation/tab/leaf/worktree/Task/Dispatch identity, and no interruption after workspace re-entry; the restart journey additionally removes renderer ownership, marks the Dispatch legacy, retains the daemon process across an app restart, and proves exact background adoption with readable ACK output and no resume replay. Distinct A/B artifacts plus live SSH, WSL, folder, remote-runtime, Linux, and Windows cutover journeys remain explicit gaps.",
       "motivatingLinks": ["https://github.com/stablyai/orca/pull/11107#discussion_r3663321387"],
-      "invariant": "Starting a worker in the coordinator's current workspace must materialize one inactive terminal tab before worker-start returns, preserve coordinator focus, and remain exactly once after workspace re-entry. After an app update or restart, an exact live legacy worker must fence automatic provider resume, adopt its original PTY into its original background pane, retain readable output, and clear the resume record without spawning, writing, signalling, interrupting, replacing, or focusing the worker. A current-contract worker whose renderer graph identity is temporarily absent must retain its Dispatch capability and settle exactly once from exact hook-attested handle, pane, and process evidence; otherwise only an exact attested coordinator may take over. An exact existing target workspace must receive a discoverable tab without stealing coordinator focus; if renderer reveal fails, worker-start must expose that the live worker remains background-only. Run and Dispatch checks must resolve through the caller's stable pane identity when a terminal handle is reminted, while a live handle outranks mismatched pane metadata, explicit legacy terminal inspection remains handle-scoped, and remote or headless worker presentation remains background-only.",
-      "oracle": "Drive Run create, Task create, and worker-start through production Electron runtimes with a deterministic Codex fixture. Require append-only ledgers with one still-live PID and no interruption, a visible inactive worker tab while the coordinator stays active, Run delivery through stable pane identity, and stable PTY/incarnation, tab, leaf, worktree, Task, and Dispatch across workspace re-entry. In a restart journey, retain the original daemon PTY and PID, remove renderer ownership, retain sleeping-session evidence, mark the Dispatch legacy, relaunch, and require exact inactive tab adoption, readable ACK output, cleared resume state, one spawn, and no resume argv or Conversation interrupted text after another workspace round trip. The service oracle removes renderer lookup identity from current-contract callers while retaining real restored-PTY and hook commitments, replays authenticated completion and takeover across fresh runtimes, and requires one Task, Dispatch, terminal authority, message, mutation, ordinary-mail delivery, remote process fencing, and unchanged fixture marker bytes while foreign pane evidence remains rejected. Unit tests separately assert authority-specific legacy affordances, exact identity and owner matching, retained-output fallback, pane-stable routing, federated non-activation, and SSH fallback parity.",
+      "invariant": "Starting a worker in the coordinator's current workspace must materialize one inactive terminal tab before worker-start returns, preserve coordinator focus, and remain exactly once after workspace re-entry. After an app update or restart, an exact live legacy worker must fence automatic provider resume, adopt its original PTY into its original background pane, retain readable output, and clear the resume record without spawning, writing, signalling, interrupting, replacing, or focusing the worker. A current-contract worker whose renderer graph identity is temporarily absent must retain its Dispatch capability and settle exactly once from exact hook-attested handle, pane, and process evidence; otherwise only an exact attested coordinator may take over. An exact existing target workspace must receive a discoverable tab without stealing coordinator focus; if renderer reveal fails, worker-start must expose that the live worker remains background-only. Run and Dispatch checks must resolve through the caller's stable pane identity when a terminal handle is reminted, while a live handle outranks mismatched pane metadata. A nested worker's creator edge requires the current creator pane, process incarnation, and owning Run generation; reminting and rebinding that pane to another Run must remove the stale edge. Explicit legacy terminal inspection remains handle-scoped, and remote or headless worker presentation remains background-only.",
+      "oracle": "Drive Run create, Task create, and worker-start through production Electron runtimes with a deterministic Codex fixture. Require append-only ledgers with one still-live PID and no interruption, a visible inactive worker tab while the coordinator stays active, Run delivery through stable pane identity, and stable PTY/incarnation, tab, leaf, worktree, Task, and Dispatch across workspace re-entry. In a restart journey, retain the original daemon PTY and PID, remove renderer ownership, retain sleeping-session evidence, mark the Dispatch legacy, relaunch, and require exact inactive tab adoption, readable ACK output, cleared resume state, one spawn, and no resume argv or Conversation interrupted text after another workspace round trip. The service oracle removes renderer lookup identity from current-contract callers while retaining real restored-PTY and hook commitments, replays authenticated completion and takeover across fresh runtimes, and requires one Task, Dispatch, terminal authority, message, mutation, ordinary-mail delivery, remote process fencing, and unchanged fixture marker bytes while foreign pane evidence remains rejected. Unit tests separately remint a creator pane and process from Run A into Run B, require the nested Run A worker to fall back to its current coordinator, require indexed query plans, and bound 300 Task reads with 50,000 retained Runs. They also assert authority-specific legacy affordances, exact identity and owner matching, retained-output fallback, pane-stable routing, federated non-activation, and SSH fallback parity.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/rpc/orchestration-runtime-update-settlement.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/cli/handlers/orchestration.test.ts src/cli/handlers/orchestration-check-identity.test.ts src/cli/handlers/orchestration-worker-cli.test.ts src/main/runtime/rpc/methods/orchestration.test.ts src/main/ssh/ssh-remote-orca-cli.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/formatter.test.ts src/main/runtime/rpc/methods/orchestration-federation.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/runtime/orca-runtime.test.ts",
         "pnpm run test:e2e -- tests/e2e/orchestration-worker-terminal-visibility.spec.ts --workers=1",
         "pnpm run test:e2e -- tests/e2e/orchestration-legacy-worker-restart-recovery.spec.ts --workers=1"
@@ -6663,6 +6874,7 @@
         "src/main/runtime/rpc/orchestration-runtime-update-settlement.test.ts",
         "src/main/runtime/orchestration/formatter.test.ts",
         "src/main/runtime/orchestration/orchestration-legacy-worker-terminal-recovery.test.ts",
+        "src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
         "src/main/runtime/orca-runtime.test.ts",
         "src/cli/handlers/orchestration.test.ts",
         "src/cli/handlers/orchestration-check-identity.test.ts",
@@ -6682,6 +6894,13 @@
             "Task, Dispatch, terminal authority, completion, and filesystem bytes are neither lost nor duplicated",
             "foreign pane evidence cannot borrow retained lifecycle authority",
             "ordinary mail and remote attachments use the same attested pane and process authority"
+          ]
+        },
+        {
+          "file": "src/main/runtime/orchestration/orchestration-creator-authority-performance.test.ts",
+          "assertions": [
+            "creator lookup uses the assignee-handle and pane-leaf indexes without a retained-Run scan",
+            "300 Task reads remain bounded with 50,000 unrelated retained Runs"
           ]
         },
         {

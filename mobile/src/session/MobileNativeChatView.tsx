@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   FlatList,
@@ -17,7 +17,6 @@ import { useMobileLocale } from '../localization/mobile-locale-provider'
 import { styles } from './mobile-native-chat-view-styles'
 import {
   buildMobileNativeChatTransientData,
-  foldMobileNativeChatMessages,
   mobileNativeChatEmptyState,
   type MobileNativeChatPendingItem
 } from './mobile-native-chat-render-data'
@@ -42,7 +41,10 @@ export type MobileNativeChatInputLockReason = 'disconnected' | 'waiting'
 
 type Props = {
   sessionKey: string
+  /** Raw transcript, only for telling "still loading" from "loaded and empty". */
   messages: NativeChatMessage[]
+  /** `messages` with noise stripped and tool turns folded in, from the overlay. */
+  folded: NativeChatMessage[]
   status: MobileNativeChatStatus
   error?: string
   /** Resolved agent for this chat; names the empty-state copy (desktop parity). */
@@ -50,9 +52,9 @@ type Props = {
   agentWorking?: boolean
   /** Interrupt the agent mid-turn (shown as a Stop button on the working bar). */
   onStop?: () => void
-  /** Live partial assistant text while a turn is still streaming (from the agent
-   *  status hook). Shown as an in-progress bubble until the transcript catches up. */
-  streamingText?: string
+  /** Live partial assistant text to show as an in-progress bubble, already gated
+   *  by the overlay against the transcript catching up. */
+  streaming: string | null
   hasMore?: boolean
   loadingEarlier?: boolean
   onLoadEarlier?: () => void
@@ -98,19 +100,21 @@ type Props = {
   onRespondPermission?: (send: string) => Promise<boolean>
   /** Open a worktree file tapped in agent markdown. */
   onOpenFile?: (relativePath: string) => void
-  /** Pixels obscured by the keyboard; the route tracks this for edge-to-edge Android. */
+  /** Pixels to lift the composer by when the soft keyboard is open. The route
+   *  owns keyboard tracking (the app uses manual lift, not KeyboardAvoidingView). */
   keyboardInset?: number
 }
 
 export function MobileNativeChatView({
   sessionKey,
   messages,
+  folded,
   status,
   error,
   agent,
   agentWorking,
   onStop,
-  streamingText,
+  streaming,
   hasMore,
   loadingEarlier,
   onLoadEarlier,
@@ -152,16 +156,16 @@ export function MobileNativeChatView({
   const { askKey, showAsk, dismissAsk } = useMobileNativeChatAskDismiss(ask)
   // Lift the composer clear of the keyboard, plus the bottom safe-area so it
   // never sits under the home indicator / nav bar (mirrors the terminal dock).
+  const bottomPad = keyboardInset > 0 ? keyboardInset + insets.bottom : insets.bottom
   const { fontScale, pinchGesture } = useMobileNativeChatPinchGesture()
 
   const pendingIds = useMemo(() => new Set(pending.map((p) => p.id)), [pending])
   // `data` is the list source: folded transcript + synthetic streaming bubble +
   // route-owned optimistic queued messages. Memoize on the same deps so the
   // downstream autoscroll effects/`renderItem` keep referential stability.
-  const foldedMessages = useMemo(() => foldMobileNativeChatMessages(messages), [messages])
   const { data } = useMemo(
-    () => buildMobileNativeChatTransientData({ folded: foldedMessages, streamingText, pending }),
-    [foldedMessages, streamingText, pending]
+    () => buildMobileNativeChatTransientData({ folded, streaming, pending }),
+    [folded, streaming, pending]
   )
   const {
     showJumpToLatest,
@@ -185,6 +189,8 @@ export function MobileNativeChatView({
       if (!accepted) {
         return false
       }
+      // The route-owned banner outlives this send; a success must retire it too,
+      // or a stale "Message not sent" sits above the delivered message.
       onClearSendError?.()
       followLatest()
       return true
@@ -243,14 +249,7 @@ export function MobileNativeChatView({
   const lockReason = lockHeld ? rawLockReason : null
 
   return (
-    <View
-      style={[
-        styles.root,
-        {
-          paddingBottom: keyboardInset > 0 ? keyboardInset + insets.bottom : insets.bottom
-        }
-      ]}
-    >
+    <View style={[styles.root, { paddingBottom: bottomPad }]}>
       {showLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.textSecondary} />
@@ -265,6 +264,9 @@ export function MobileNativeChatView({
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               contentContainerStyle={styles.listContent}
+              // Let link/file taps land while the composer keyboard is up
+              // instead of being swallowed by the dismiss gesture.
+              keyboardShouldPersistTaps="handled"
               onScroll={onScroll}
               onScrollBeginDrag={onScrollBeginDrag}
               onScrollEndDrag={onScrollEndDrag}
@@ -365,7 +367,7 @@ export function MobileNativeChatView({
           />
         ) : null}
         {/* Chrome row above the composer: the working indicator and the global
-          tool-calls expand/collapse toggle on the left, Stop in the far corner. */}
+            tool-calls expand/collapse toggle on the left, Stop in the far corner. */}
         <View style={styles.chromeRow}>
           <View style={styles.chromeLeft}>
             {agentWorking ? <MobileAgentWorkingIndicator /> : null}
@@ -402,6 +404,7 @@ export function MobileNativeChatView({
           ) : null}
         </View>
         {sendErrorMessage ? (
+          // This banner is the only channel for a send failure — announce it.
           <View
             style={styles.sendError}
             accessibilityRole="alert"

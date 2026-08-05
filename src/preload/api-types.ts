@@ -49,6 +49,7 @@ import type {
 } from '../shared/terminal-render-desync-evidence'
 import type { MobileRelayStatus } from '../shared/mobile-relay-status'
 import type { MobilePairingConnectionMode } from '../shared/mobile-pairing-connection-mode'
+import type { RuntimePairingReach } from '../shared/runtime-pairing-reach'
 import type { MobileRelayMintFailure } from '../shared/mobile-relay-mint-failure'
 import type { VerifyAndAddRuntimeEnvironmentResult } from '../shared/remote-pairing-verification'
 import type {
@@ -123,6 +124,7 @@ import type {
   BrowserCertificateProceedResult,
   BrowserLoadError,
   BrowserSessionProfile,
+  BrowserSessionProfileCreateOptions,
   BrowserSessionProfileScope,
   BrowserSessionProfileSource,
   BrowserViewportOverride,
@@ -616,10 +618,12 @@ export type BrowserApi = {
     callback: (args: { browserPageId: string; key: 'c' | 's' }) => void
   ) => () => void
   sessionListProfiles: () => Promise<BrowserSessionProfile[]>
-  sessionCreateProfile: (args: {
-    scope: BrowserSessionProfileScope
-    label: string
-  }) => Promise<BrowserSessionProfile | null>
+  sessionCreateProfile: (
+    args: {
+      scope: BrowserSessionProfileScope
+      label: string
+    } & BrowserSessionProfileCreateOptions
+  ) => Promise<BrowserSessionProfile | null>
   sessionDeleteProfile: (args: { profileId: string }) => Promise<boolean>
   sessionImportCookies: (args: { profileId: string }) => Promise<BrowserCookieImportResult>
   sessionResolvePartition: (args: { profileId: string | null }) => Promise<string | null>
@@ -2129,6 +2133,8 @@ export type PreloadApi = {
       args: GitLabRepoSelectorArgs & {
         jobId: number
         projectRef?: GitLabProjectRef | null
+        /** Bound the trace in main to a readable excerpt (see gitLabJobTraceToLogExcerpt). */
+        logExcerpt?: boolean
       }
     ) => Promise<GitLabJobTraceResult>
     retryJob: (
@@ -3016,6 +3022,7 @@ export type PreloadApi = {
           capability: CommitMessageAgentCapability
           models: CommitMessageModelCapability[]
           defaultModelId: string
+          catalogOrigin: 'probe' | 'spec'
         }
       | { success: false; error: string }
     >
@@ -3648,7 +3655,11 @@ export type PreloadApi = {
       { ok: true } | { ok: false; reason: 'cancelled' | 'failed' | 'unsupported' }
     >
     openWindowsNetworkSettings: () => Promise<boolean>
-    getRuntimePairingUrl: (args?: { address?: string; rotate?: boolean }) => Promise<
+    getRuntimePairingUrl: (args?: {
+      address?: string
+      rotate?: boolean
+      reach?: RuntimePairingReach
+    }) => Promise<
       | { available: false; reason?: 'network_exposure_failed'; guidance?: string }
       | {
           available: true

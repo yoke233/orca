@@ -56,6 +56,7 @@ export const simplifiedChinese = {
   'host.worktreeMany': '{count} 个工作区',
   'host.activeWorktrees': ' · {count} 个活跃工作区',
   'host.worktreeListUnavailable': '工作区列表不可用',
+  'host.lastKnownWorktrees': '上次统计：{summary}',
   'host.discoveryHint': '更新桌面端 Orca 并登录，即可随时随地连接',
   'settings.title': '设置',
   'settings.language': '语言',
