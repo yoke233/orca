@@ -20,12 +20,12 @@ import {
   mobileNativeChatEmptyState,
   type MobileNativeChatPendingItem
 } from './mobile-native-chat-render-data'
-import { useMobileNativeChatAskDismiss } from './use-mobile-native-chat-ask-dismiss'
 import { useMobileNativeChatPinchGesture } from './use-mobile-native-chat-pinch-gesture'
 import { useMobileNativeChatScroll } from './use-mobile-native-chat-scroll'
 import { MobileAgentWorkingIndicator } from './MobileAgentWorkingIndicator'
 import type { PendingNativeChatImage } from './mobile-native-chat-image-attachment'
 import { MobileNativeChatComposer } from './MobileNativeChatComposer'
+import type { MobileNativeChatSessionOptionPickersProps } from './MobileNativeChatSessionOptionPickers'
 import { MobileNativeChatMessage } from './MobileNativeChatMessage'
 import { MobileNativeChatAsk } from './MobileNativeChatAsk'
 import type { AskAnswerSelection, AskPrompt } from './mobile-native-chat-ask'
@@ -85,11 +85,18 @@ type Props = {
   onClearSendError?: () => void
   filePaths?: string[]
   onNeedFiles?: (query: string) => void
+  /** Model/session-option pickers for the composer action row (desktop parity). */
+  sessionOptions?: MobileNativeChatSessionOptionPickersProps | null
   /** A pending agent question/permission detected from live status, shown as a
    *  native card above the composer; answering sends text to the agent. */
   /** Structured AskUserQuestion prompt parsed from the transcript (preferred over
    *  the heuristic question card). */
   ask?: AskPrompt | null
+  /** Stable key for the ask card. Dismissal state lives in the controller (it
+   *  must survive this subtree unmounting on a chat↔terminal toggle). */
+  askKey?: string | null
+  /** Hide the answered/dismissed ask until a different question arrives. */
+  onDismissAsk?: () => void
   /** Deliver the ask answer as per-question selections; the send hook turns them
    *  into selector keystrokes (Claude) or pasted label text (other agents). */
   onAnswerAsk?: (prompt: AskPrompt, selections: AskAnswerSelection[]) => Promise<boolean>
@@ -136,7 +143,10 @@ export function MobileNativeChatView({
   onClearSendError,
   filePaths,
   onNeedFiles,
+  sessionOptions,
   ask,
+  askKey,
+  onDismissAsk,
   onAnswerAsk,
   onCancelAsk,
   question,
@@ -150,10 +160,6 @@ export function MobileNativeChatView({
   const { t } = useMobileLocale()
   const listRef = useRef<FlatList<NativeChatMessage>>(null)
   const [toolsExpanded, setToolsExpanded] = useState(false)
-  // Dismiss the question card as soon as it's answered; the live status lingers
-  // briefly (the agent emits a post-tool event with the same prompt), so hide it
-  // until a genuinely different question arrives.
-  const { askKey, showAsk, dismissAsk } = useMobileNativeChatAskDismiss(ask)
   // Lift the composer clear of the keyboard, plus the bottom safe-area so it
   // never sits under the home indicator / nav bar (mirrors the terminal dock).
   const bottomPad = keyboardInset > 0 ? keyboardInset + insets.bottom : insets.bottom
@@ -332,23 +338,24 @@ export function MobileNativeChatView({
         </GestureHandlerRootView>
       )}
       {/* Pending agent prompt: a structured AskUserQuestion wins, then a
-          heuristic permission, then a heuristic question. */}
+          heuristic permission, then a heuristic question. The controller owns
+          dismissal so it survives chat/terminal view toggles. */}
       <View style={styles.composerWrap}>
-        {showAsk && ask ? (
+        {ask ? (
           <MobileNativeChatAsk
             key={askKey ?? 'ask'}
             prompt={ask}
             onAnswer={async (selections) => {
               const accepted = (await onAnswerAsk?.(ask, selections)) ?? false
               if (accepted) {
-                dismissAsk()
+                onDismissAsk?.()
               }
               return accepted
             }}
             onCancel={async () => {
               const accepted = (await onCancelAsk?.()) ?? false
               if (accepted) {
-                dismissAsk()
+                onDismissAsk?.()
               }
               return accepted
             }}
@@ -417,6 +424,8 @@ export function MobileNativeChatView({
           value={composerText}
           onChangeText={onComposerTextChange}
           onSend={handleSend}
+          agent={agent}
+          sessionOptions={sessionOptions}
           onAttachImage={onAttachImage}
           attachments={attachments}
           onRemoveAttachment={onRemoveAttachment}
