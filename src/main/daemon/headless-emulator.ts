@@ -20,22 +20,11 @@ import {
 } from './terminal-view-attribute-responder'
 import type { TerminalSnapshot, TerminalModes } from './types'
 import type { TerminalOscLinkRange } from '../../shared/terminal-osc-link-ranges'
-
-export type HeadlessEmulatorOptions = {
-  cols: number
-  rows: number
-  scrollback?: number
-  /** Query reply sink (terminal-query-authority.md); only `forwardQueryReplies` writes emit here. The daemon Session must never pass this. */
-  onQueryReply?: (reply: string) => void
-  pathFlavor?: 'posix' | 'win32'
-  remotePosixFileUriAuthority?: boolean
-  wslDistro?: string
-}
-
-export type HeadlessEmulatorWriteOptions = {
-  /** Reply ownership for this exact chunk; default false so seed/hydration/snapshot writes never forward (main-side replay guard; twin of renderer replay-guard.ts). */
-  forwardQueryReplies?: boolean
-}
+import { installTerminalCodexWindowsScrollbackCompatibility } from '../../shared/terminal-codex-windows-scrollback'
+import type {
+  HeadlessEmulatorOptions,
+  HeadlessEmulatorWriteOptions
+} from './headless-emulator-options'
 
 type TerminalWithSynchronousWrite = Terminal & {
   _core?: {
@@ -85,6 +74,13 @@ export class HeadlessEmulator {
       // Why: parse CSI =/>/< u pushes so CSI ? u answers with the flags the hidden app pushed (renderer parity).
       vtExtensions: { kittyKeyboard: true }
     })
+
+    if (opts.preserveCodexWindowsScrollback) {
+      installTerminalCodexWindowsScrollbackCompatibility({
+        terminal: this.terminal,
+        shouldHandle: () => true
+      })
+    }
 
     this.serializer = new SerializeAddon()
     this.terminal.loadAddon(this.serializer)

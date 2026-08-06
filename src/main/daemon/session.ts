@@ -145,7 +145,9 @@ export class Session {
       cols: size.cols,
       rows: size.rows,
       scrollback: opts.scrollback,
-      wslDistro: opts.wslDistro
+      wslDistro: opts.wslDistro,
+      preserveCodexWindowsScrollback:
+        opts.launchAgent === 'codex' && opts.ownerBackend === 'windows-conpty'
       // No onData: the daemon emulator must never reply to query sequences — the renderer's xterm is
       // the authoritative responder and a daemon reply would race ahead and clobber it. See HeadlessEmulator.
     })

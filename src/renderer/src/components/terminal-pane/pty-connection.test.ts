@@ -17268,6 +17268,62 @@ describe('connectPanePty', () => {
     }
   })
 
+  it('enables the SU scrollback handler only while native Windows Codex owns the pane', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    )
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      transportFactoryQueue.push(transport)
+      mockStoreState = {
+        ...mockStoreState,
+        tabsByWorktree: {
+          'wt-1': [{ id: 'tab-1', ptyId: 'tab-pty', launchAgent: 'codex' }]
+        }
+      } as StoreState
+
+      const pane = createPane(1)
+      const normalBuffer = { scrollTop: 0, scrollBottom: 3 }
+      const scroll = vi.fn()
+      Object.assign(pane.terminal, {
+        _core: {
+          _bufferService: {
+            buffer: normalBuffer,
+            buffers: { normal: normalBuffer },
+            scroll
+          },
+          _inputHandler: { _eraseAttrData: () => ({}) }
+        }
+      })
+
+      const binding = connectPanePty(
+        pane as never,
+        createManager(1) as never,
+        createDeps() as never
+      )
+      const handler = (
+        pane.terminal.parser.registerCsiHandler as unknown as {
+          mock: { calls: [[{ final: string }, (params: (number | number[])[]) => boolean]] }
+        }
+      ).mock.calls.find(([identifier]) => identifier.final === 'S')?.[1]
+
+      expect(handler).toBeTypeOf('function')
+      expect(handler?.([2])).toBe(true)
+      expect(scroll).toHaveBeenCalledTimes(2)
+
+      mockStoreState.paneForegroundAgentByPaneKey[makePaneKey('tab-1', LEAF_1)] = {
+        agent: null,
+        shellForeground: true
+      }
+      expect(handler?.([2])).toBe(false)
+      expect(scroll).toHaveBeenCalledTimes(2)
+      binding.dispose()
+    } finally {
+      restoreNavigator()
+    }
+  })
+
   it('forces the native Windows CJK repaint path for foreground agent output without recent terminal input', async () => {
     const restoreNavigator = temporarilySetNavigatorUserAgent(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'

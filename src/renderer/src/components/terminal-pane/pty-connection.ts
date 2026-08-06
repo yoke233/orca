@@ -21,6 +21,7 @@ import { isRuntimeOwnedSshTargetId, parseExecutionHostId } from '../../../../sha
 import { createTerminalZeroDimensionsMessage } from '../../../../shared/terminal-zero-dimensions-diagnostic'
 import { isWorktreeRemovalFenceError } from '../../../../shared/worktree-removal-fence-error'
 import { parseTerminalOscColorQuery } from '../../../../shared/terminal-osc-color-reply'
+import { installTerminalCodexWindowsScrollbackCompatibility } from '../../../../shared/terminal-codex-windows-scrollback'
 import {
   HIDDEN_STARTUP_RENDERER_QUERY_PENDING_CHARS,
   containsCsiRendererQuery,
@@ -3868,6 +3869,25 @@ export function connectPanePty(
     isReplaying: () => isPaneReplaying(deps.replayingPanesRef, pane.id),
     ...(isNativeWindowsConpty ? { da1Response: CONPTY_DA1_RESPONSE } : {})
   })
+  const codexWindowsScrollbackCompatibilityDisposable =
+    installTerminalCodexWindowsScrollbackCompatibility({
+      terminal: pane.terminal,
+      shouldHandle: () => {
+        if (!isNativeWindowsConpty) {
+          return false
+        }
+        if (commandInferredPaneAgent) {
+          return commandInferredPaneAgent === 'codex'
+        }
+        const currentState = useAppStore.getState()
+        const foreground = currentState.paneForegroundAgentByPaneKey[cacheKey]
+        if (foreground) {
+          return foreground.agent === 'codex' && !foreground.shellForeground
+        }
+        const status = currentState.agentStatusByPaneKey[cacheKey]
+        return status?.agentType === 'codex' || getAuthoritativePaneAgent() === 'codex'
+      }
+    })
   const respondToTerminalPixelSizeQueries = createTerminalPixelSizeQueryResponder(
     pane.terminal,
     sendDesktopQueryReplyImmediate
@@ -9197,6 +9217,7 @@ export function connectPanePty(
       onDataDisposable.dispose()
       userInputActivityDisposable?.dispose()
       terminalCapabilityRepliesDisposable.dispose()
+      codexWindowsScrollbackCompatibilityDisposable.dispose()
       onResizeDisposable.dispose()
       onBufferChangeDisposable?.dispose()
       pane.container.removeEventListener(PANE_PTY_RESIZE_HOLD_FLUSH_EVENT, onHeldPtyResizeFlush)

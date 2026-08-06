@@ -35,6 +35,22 @@ describe('HeadlessEmulator', () => {
       expect(snapshot.snapshotAnsi).toContain('hello world')
     })
 
+    it('preserves Codex normal-screen rows scrolled by SU when enabled', async () => {
+      emulator = new HeadlessEmulator({
+        cols: 20,
+        rows: 6,
+        scrollback: 100,
+        preserveCodexWindowsScrollback: true
+      })
+      await emulator.write('A01\r\nA02\r\nA03\r\nA04\r\nA05\r\nA06')
+      await emulator.write('\x1b[1;4r\x1b[2S\x1b[r')
+
+      expect(emulator.getSnapshot().scrollbackLines).toBe(2)
+      expect(emulator.getBufferTailLines(8)).toEqual(
+        expect.arrayContaining(['A01', 'A02', 'A03', 'A04', 'A05', 'A06'])
+      )
+    })
+
     it('captures PTY output in immediate snapshots without waiting for queued parsing', () => {
       emulator = new HeadlessEmulator({ cols: 80, rows: 24 })
 
