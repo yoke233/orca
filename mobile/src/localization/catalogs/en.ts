@@ -60,6 +60,8 @@ export const english = {
   'host.worktreeListUnavailable': 'Worktree list unavailable',
   'host.lastKnownWorktrees': 'Last known: {summary}',
   'host.discoveryHint': 'Update desktop Orca and sign in to connect from anywhere',
+  'host.openAccessibility': 'Open {name}',
+  'host.actionsAccessibility': 'Actions for {name}',
   'settings.title': 'Settings',
   'settings.language': 'Language',
   'settings.terminal': 'Terminal',

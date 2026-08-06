@@ -62,6 +62,8 @@ export const simplifiedChinese = {
   'host.worktreeListUnavailable': '工作区列表不可用',
   'host.lastKnownWorktrees': '上次统计：{summary}',
   'host.discoveryHint': '更新桌面端 Orca 并登录，即可随时随地连接',
+  'host.openAccessibility': '打开 {name}',
+  'host.actionsAccessibility': '{name} 的操作',
   'settings.title': '设置',
   'settings.language': '语言',
   'settings.terminal': '终端',

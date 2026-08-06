@@ -16,7 +16,7 @@ vi.mock('react-native', () => ({
   Text: 'Text',
   View: 'View'
 }))
-vi.mock('lucide-react-native', () => ({ ChevronRight: 'ChevronRight', Monitor: 'Monitor' }))
+vi.mock('lucide-react-native', () => ({ Monitor: 'Monitor', MoreVertical: 'MoreVertical' }))
 vi.mock('./StatusDot', () => ({ StatusDot: 'StatusDot' }))
 vi.mock('../localization/mobile-locale-provider', async () => {
   const { translateMobileCopy } = await import('../localization/mobile-locale')
@@ -78,7 +78,8 @@ describe('MobileHostCard', () => {
           credentialStatus: overrides?.credentialStatus,
           worktreeInfo,
           onPress: () => {},
-          onLongPress: () => {}
+          onLongPress: () => {},
+          onOpenActions: () => {}
         })
       )
     })

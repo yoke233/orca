@@ -35,6 +35,8 @@ import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type { AppIdentity } from '../shared/app-identity'
 import type { ReleaseChannel } from '../shared/release-channel'
 import type {
+  ForgetRemovedWorktreesForExecutionHostArgs,
+  ForgetRemovedWorktreesForExecutionHostResult,
   HostQualifiedKnownWorktreeResult,
   HostQualifiedDetectedWorktreeResult,
   LegacyDetectedWorktreeRequest,
@@ -764,6 +766,10 @@ export type PtyManagementSession = {
   protocolVersion: number
 }
 
+// 'severed': macOS can no longer attribute daemon terminals to Orca, so Accessibility/
+// Automation grants silently stop applying until the daemon is restarted (STA-3491).
+export type PtyManagementMacTccAttributionHealth = 'intact' | 'severed' | 'unknown'
+
 export type PtyManagementApi = {
   // `degraded`: daemon is alive but can't spawn fresh PTYs, so new terminals run locally without daemon persistence.
   listSessions: () => Promise<{ sessions: PtyManagementSession[]; degraded: boolean }>
@@ -774,6 +780,7 @@ export type PtyManagementApi = {
   }>
   killOne: (args: { sessionId: string }) => Promise<{ success: boolean }>
   restart: () => Promise<{ success: boolean }>
+  macTccAttribution: () => Promise<{ health: PtyManagementMacTccAttributionHealth }>
 }
 
 export type ExportApi = {
@@ -1409,6 +1416,10 @@ export type PreloadApi = {
     listKnownForExecutionHost?: (
       args: ListKnownWorktreesForExecutionHostArgs
     ) => Promise<HostQualifiedKnownWorktreeResult>
+    /** Retires the persisted metadata an authoritative scan proved gone, so it stops feeding the read above. */
+    forgetRemovedForExecutionHost?: (
+      args: ForgetRemovedWorktreesForExecutionHostArgs
+    ) => Promise<ForgetRemovedWorktreesForExecutionHostResult>
     cancelListDetected?: (args: { providerRequestId: ProviderRequestId }) => Promise<void>
     listAll: () => Promise<Worktree[]>
     create: (args: CreateWorktreeArgs) => Promise<CreateWorktreeResult>
