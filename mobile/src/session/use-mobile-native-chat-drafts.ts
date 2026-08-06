@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import {
   countUserTextOccurrences,
+  findLandedImagePreviewEchoes,
+  mergeLandedImagePreviewEchoes,
+  migrateImagePreviewMessageIds,
   reconcilePendingMessages
 } from './mobile-native-chat-draft-reconcile'
 import {
@@ -10,6 +13,12 @@ import {
   type MobileNativeChatSendOrigin
 } from './mobile-native-chat-draft-contract'
 import { useMobileNativeChatDraftMutations } from './mobile-native-chat-draft-state'
+import {
+  appendMobileNativeChatPending,
+  combineMobileNativeChatPending,
+  mergeWaitingSessionPending,
+  removeWaitingSessionPending
+} from './mobile-native-chat-pending-echo'
 import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
 import { useMobileNativeChatUnconfirmedSend } from './use-mobile-native-chat-unconfirmed-send'
 import { useMobileNativeChatLaunchDraftSeed } from './use-mobile-native-chat-launch-draft-seed'
@@ -19,6 +28,8 @@ export type {
   MobileNativeChatPendingMessage,
   MobileNativeChatSendOrigin
 } from './mobile-native-chat-draft-contract'
+
+const NO_IMAGE_PREVIEWS: Record<string, string[]> = {}
 
 export function useMobileNativeChatDrafts(args: {
   hostId: string
@@ -40,6 +51,9 @@ export function useMobileNativeChatDrafts(args: {
   composerText: string
   setComposerText: Dispatch<SetStateAction<string>>
   pending: MobileNativeChatPendingMessage[]
+  /** Phone-local previews rebound to the transcript message that replaced the
+   *  optimistic echo, keyed by authoritative message id. */
+  imagePreviewsByMessageId: Record<string, string[]>
   captureSendOrigin: (text: string) => MobileNativeChatSendOrigin | null
   /** Launch-context text still believed to be parked on the agent's TUI input
    *  line, or null once it has been declined or retired. Send paths size their
@@ -74,6 +88,12 @@ export function useMobileNativeChatDrafts(args: {
   const draftsRef = useRef<Record<string, string>>({})
   const [pendingBySession, setPendingBySession] = useState<
     Record<string, MobileNativeChatPendingMessage[]>
+  >({})
+  const [pendingWaitingForSession, setPendingWaitingForSession] = useState<
+    Record<string, MobileNativeChatPendingMessage[]>
+  >({})
+  const [imagePreviewsBySession, setImagePreviewsBySession] = useState<
+    Record<string, Record<string, string[]>>
   >({})
   const pendingCounterRef = useRef(0)
   const draftEditRevisionsRef = useRef<Record<string, number>>({})
@@ -146,41 +166,21 @@ export function useMobileNativeChatDrafts(args: {
 
   const acceptSend = useCallback(
     (origin: MobileNativeChatSendOrigin, text: string, images?: string[]) => {
-      // Why: the first prompt can be sent before the provider reports a session
-      // id; wait for an id before keying an optimistic echo.
-      if (!origin.pendingKey) {
+      if (!origin.pendingKey && !images?.length) {
         return
       }
-      const pendingKey = origin.pendingKey
       pendingCounterRef.current += 1
-      setPendingBySession((previous) => {
-        const current = previous[pendingKey] ?? NO_PENDING_MESSAGES
-        const earlierOutstanding = current.filter(
-          (pending) =>
-            pending.text.trim() === origin.normalizedText &&
-            pending.expectedOccurrence > origin.baselineOccurrences
-        ).length
-        // An empty-text send reconciles by image-echo ordinal: every outstanding
-        // send's ridden-along images echo as `[Image: source: …]` turns after
-        // this send's baseline tail, ahead of this send's own echo.
-        const expectedImageEchoOrdinal =
-          current.reduce(
-            (sum, pending) =>
-              sum + (pending.images?.length ?? (pending.text.trim() === '' ? 1 : 0)),
-            0
-          ) + Math.max(1, images?.length ?? 0)
-        const pending: MobileNativeChatPendingMessage = {
-          id: `pending-${pendingCounterRef.current}`,
-          text,
-          expectedOccurrence:
-            origin.normalizedText === ''
-              ? expectedImageEchoOrdinal
-              : origin.baselineOccurrences + earlierOutstanding + 1,
-          baselineTailMessageId: origin.baselineTailMessageId,
-          ...(images && images.length > 0 ? { images } : {})
-        }
-        return { ...previous, [pendingKey]: [...current, pending] }
-      })
+      const id = `pending-${pendingCounterRef.current}`
+      const key = origin.pendingKey
+      if (key) {
+        setPendingBySession((previous) =>
+          appendMobileNativeChatPending(previous, key, id, origin, text, images)
+        )
+      } else {
+        setPendingWaitingForSession((previous) =>
+          appendMobileNativeChatPending(previous, origin.draftKey, id, origin, text, images)
+        )
+      }
     },
     []
   )
@@ -193,17 +193,56 @@ export function useMobileNativeChatDrafts(args: {
     draftEditRevisionsRef
   })
 
-  const pending = pendingKey
-    ? (pendingBySession[pendingKey] ?? NO_PENDING_MESSAGES)
+  const waitingForSession = draftKey
+    ? (pendingWaitingForSession[draftKey] ?? NO_PENDING_MESSAGES)
     : NO_PENDING_MESSAGES
   useEffect(() => {
-    if (!pendingKey || pending.length === 0) {
+    if (!draftKey || !pendingKey || waitingForSession.length === 0) {
       return
+    }
+    const movedIds = new Set(waitingForSession.map((item) => item.id))
+    setPendingBySession((previous) =>
+      mergeWaitingSessionPending(previous, pendingKey, waitingForSession)
+    )
+    setPendingWaitingForSession((previous) =>
+      removeWaitingSessionPending(previous, draftKey, movedIds)
+    )
+  }, [draftKey, pendingKey, waitingForSession])
+
+  const sessionPending = pendingKey
+    ? (pendingBySession[pendingKey] ?? NO_PENDING_MESSAGES)
+    : NO_PENDING_MESSAGES
+  const pending = combineMobileNativeChatPending(sessionPending, waitingForSession)
+  useEffect(() => {
+    if (!pendingKey) {
+      return
+    }
+    setImagePreviewsBySession((previous) =>
+      migrateImagePreviewMessageIds(previous, pendingKey, messages)
+    )
+    if (pending.length === 0) {
+      return
+    }
+    const landedImagePreviews = findLandedImagePreviewEchoes(messages, pending)
+    const landedImagePendingIds = new Set(landedImagePreviews.map((preview) => preview.pendingId))
+    if (landedImagePreviews.length > 0) {
+      setImagePreviewsBySession((previous) =>
+        mergeLandedImagePreviewEchoes(previous, pendingKey, landedImagePreviews)
+      )
     }
     setPendingBySession((previous) => {
       const current = previous[pendingKey] ?? []
-      const next = reconcilePendingMessages(messages, current)
-      if (next === current) {
+      const reconciled = new Set(reconcilePendingMessages(messages, current))
+      const next = current.filter((item) => {
+        if (landedImagePendingIds.has(item.id)) {
+          return false
+        }
+        if (item.images?.length && item.text.trim() !== '') {
+          return true
+        }
+        return reconciled.has(item)
+      })
+      if (next.length === current.length) {
         return previous
       }
       if (next.length > 0) {
@@ -219,6 +258,9 @@ export function useMobileNativeChatDrafts(args: {
     composerText: draftKey ? (drafts[draftKey] ?? '') : '',
     setComposerText,
     pending,
+    imagePreviewsByMessageId: pendingKey
+      ? (imagePreviewsBySession[pendingKey] ?? NO_IMAGE_PREVIEWS)
+      : NO_IMAGE_PREVIEWS,
     captureSendOrigin,
     readSeededLaunchDraft,
     readSeededLaunchDraftSeed,

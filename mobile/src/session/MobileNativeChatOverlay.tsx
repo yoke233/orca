@@ -85,6 +85,7 @@ export function MobileNativeChatOverlay({
         onLoadEarlier={session.loadEarlier}
         onSend={images.sendNativeChat}
         pending={controller.chatPending}
+        imagePreviewsByMessageId={controller.chatImagePreviewsByMessageId}
         composerText={controller.chatComposerText}
         onComposerTextChange={controller.setChatComposerText}
         onAttachImage={() => void images.attachImage('library')}

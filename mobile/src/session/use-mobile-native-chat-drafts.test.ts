@@ -244,6 +244,7 @@ describe('useMobileNativeChatDrafts', () => {
       )
     )
     expect(state?.pending).toEqual([])
+    expect(state?.imagePreviewsByMessageId).toEqual({ u1: ['file:///a.jpg'] })
   })
 
   it("keeps an image-only echo when an unrelated text send's echo lands", async () => {
@@ -317,6 +318,29 @@ describe('useMobileNativeChatDrafts', () => {
       )
     )
     expect(state?.pending).toEqual([])
+    expect(state?.imagePreviewsByMessageId).toEqual({ u2: ['file:///a.jpg'] })
+  })
+
+  it('hands a marker-only image preview to the authoritative user bubble', async () => {
+    await mount('a')
+    const origin = state?.captureSendOrigin('')
+    act(() => {
+      if (origin) {
+        state?.acceptSend(origin, '', ['file:///a.jpg'])
+      }
+    })
+
+    await act(async () =>
+      renderer?.update(
+        createElement(Harness, {
+          tabId: 'a',
+          messages: [userTextMessage('u1', '[Image #1]')]
+        })
+      )
+    )
+
+    expect(state?.pending).toEqual([])
+    expect(state?.imagePreviewsByMessageId).toEqual({ u1: ['file:///a.jpg'] })
   })
 
   it('waits for every image source turn before clearing a multi-image pending send', async () => {
@@ -858,23 +882,5 @@ describe('useMobileNativeChatDrafts', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it('accepts and clears the first send before a provider session id exists', async () => {
-    await mount('a')
-    await act(async () => renderer?.update(createElement(Harness, { tabId: 'a', sessionId: null })))
-    act(() => state?.setComposerText('start the session'))
-
-    const origin = state?.captureSendOrigin('start the session')
-    expect(origin).toMatchObject({ pendingKey: null })
-    act(() => {
-      if (origin) {
-        state?.clearDraftForSend(origin, 'start the session')
-        state?.acceptSend(origin, 'start the session')
-      }
-    })
-
-    expect(state?.composerText).toBe('')
-    expect(state?.pending).toEqual([])
   })
 })

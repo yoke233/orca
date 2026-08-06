@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, type MutableRefObject } from 'react'
+import { encodeNativeChatTranscriptIdentity } from '../../../src/shared/native-chat-transcript-retention'
 import { useMobileSessionViewMode } from './use-mobile-session-view-mode'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
@@ -88,6 +89,7 @@ export function useMobileNativeChatController(args: {
 
   const nativeChatSession = useMobileNativeChatSession({
     client,
+    sourceIdentity: encodeNativeChatTranscriptIdentity([hostId, worktreeId]),
     agent: activeChatResolution?.agent ?? null,
     sessionId: activeChatSessionId,
     transcriptPath: activeChatResolution?.transcriptPath ?? null
@@ -96,6 +98,7 @@ export function useMobileNativeChatController(args: {
     composerText: chatComposerText,
     setComposerText: setChatComposerText,
     pending: chatPending,
+    imagePreviewsByMessageId: chatImagePreviewsByMessageId,
     captureSendOrigin,
     readSeededLaunchDraft,
     readSeededLaunchDraftSeed,
@@ -137,7 +140,8 @@ export function useMobileNativeChatController(args: {
   } = useMobileNativeChatPrompts({
     enabled: activeChatResolution != null,
     status: nativeChatStatus,
-    messages: nativeChatSession.messages
+    messages: nativeChatSession.messages,
+    transcriptLoading: nativeChatSession.transcriptLoading
   })
   // A never-read transcript cannot prove that a dismissed prompt cleared.
   const nativeChatTranscriptSettled =
@@ -233,8 +237,7 @@ export function useMobileNativeChatController(args: {
     onSendError
   })
 
-  // A Codex-style model change happens in the agent's own TUI picker — bring
-  // the terminal view forward so the dispatched `/model` selector is visible.
+  // Bring the terminal view forward when an agent-owned picker command is used.
   const handleAgentPicker = useCallback(() => {
     if (activeSessionTabId && isTabChatView(activeSessionTabId)) {
       toggleTabChatView(activeSessionTabId)
@@ -266,6 +269,7 @@ export function useMobileNativeChatController(args: {
     chatComposerText,
     setChatComposerText,
     chatPending,
+    chatImagePreviewsByMessageId,
     nativeChatSession,
     nativeChatAgentWorking,
     nativeChatStreamingText,

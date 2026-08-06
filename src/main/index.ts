@@ -174,7 +174,10 @@ import {
 } from './startup/startup-diagnostics'
 import { ensureWindowsUserDataAclGrant } from './startup/windows-user-data-acl'
 import { shouldQuitWhenAllWindowsClosed } from './startup/window-all-closed-quit-policy'
-import { createServeDesktopActivationGate } from './startup/serve-desktop-activation'
+import {
+  createServeDesktopActivationGate,
+  settleServeDesktopActivation as settleServeDesktopActivationGate
+} from './startup/serve-desktop-activation'
 import { RateLimitService } from './rate-limits/service'
 import { readMiniMaxSessionCookie } from './minimax/minimax-cookie-store'
 import { getInitialClaudeRateLimitTarget } from './rate-limits/claude-rate-limit-target'
@@ -185,7 +188,10 @@ import {
   ensureAutoUpdaterConfigured
 } from './window/attach-main-window-services'
 import { createMainWindow, loadMainWindow } from './window/createMainWindow'
-import { zoomDashboardPopoutIfFocused } from './window/dashboard-popout-window'
+import {
+  getDashboardPopoutWindow,
+  zoomDashboardPopoutIfFocused
+} from './window/dashboard-popout-window'
 import {
   createSystemTray,
   destroySystemTray,
@@ -255,7 +261,7 @@ import { AgentAwakeService } from './agent-awake-service'
 import { registerSystemResumeBroadcast } from './system-resume-broadcast'
 import { settleTeardownWithinDeadline } from './quit-teardown-deadline'
 import { quitTeardownStartGate } from './quit-teardown-start-gate'
-import { detachAllSshSessionsForShutdown } from './ipc/ssh'
+import { beginSshShutdown } from './ipc/ssh'
 import { PluginService } from './plugins/plugin-service'
 import { PluginKillListService } from './plugins/plugin-kill-list-service'
 import { getPluginsDataDir } from './plugins/plugin-discovery'
@@ -300,6 +306,7 @@ import {
 } from '../shared/synthetic-agent-title'
 import type { AgentStatusState } from '../shared/agent-status-types'
 import { resolveTuiAgentPermissionMode } from '../shared/tui-agent-permissions'
+import { isAskUserQuestionTool } from '../shared/agent-question-answered-intent'
 import type { TerminalSideEffectBatch } from '../shared/terminal-side-effect-facts'
 import {
   HEADLESS_RUNTIME_WINDOW_ID,
@@ -630,11 +637,9 @@ function getDesktopWindowStatus(): RuntimeDesktopWindowStatus {
 }
 
 function settleServeDesktopActivation(): void {
-  if (getLocalPtyProvider() instanceof LocalPtyProvider) {
-    desktopActivationGate.markBlocked('persistent PTY provider unavailable')
-    return
-  }
-  desktopActivationGate.markReady()
+  settleServeDesktopActivationGate(desktopActivationGate, {
+    hasPersistentPtyProvider: !(getLocalPtyProvider() instanceof LocalPtyProvider)
+  })
 }
 
 // Why: webContents-scoped auto-expiring flag so an intent can't leak to a later renderer load; `consume` clears on match for one-shot signals.
@@ -1449,7 +1454,16 @@ function openMainWindow(): BrowserWindow {
       maybeAutoRenameBranchOnFirstWorkFromHook({ paneKey, tabId, worktreeId, payload, isReplay })
       const orchestration = runtime?.getAgentStatusOrchestrationContextForPaneKey(paneKey)
       const terminalHandle = runtime?.getAgentStatusTerminalHandleForPaneKey(paneKey)
-      mainWindow?.webContents.send('agentStatus:set', {
+      const suppressSyntheticCodexAutoApprovalTitle =
+        payload.agentType === 'codex' &&
+        (payload.state === 'waiting' || payload.state === 'blocked')
+          ? shouldSuppressCodexAutoApprovalSyntheticTitleFromHook({
+              agentType: payload.agentType,
+              state: payload.state,
+              launchConfig: runtime?.getAgentStatusLaunchConfigForPaneKey(paneKey, { launchToken })
+            })
+          : false
+      const statusEvent = {
         ...payload,
         paneKey,
         ...(launchToken ? { launchToken } : {}),
@@ -1463,19 +1477,14 @@ function openMainWindow(): BrowserWindow {
         ...(promptInteractionKey ? { promptInteractionKey } : {}),
         ...(restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
         ...(orchestration ? { orchestration } : {})
-      })
+      }
+      mainWindow?.webContents.send('agentStatus:set', statusEvent)
+      if (!suppressSyntheticCodexAutoApprovalTitle || isAskUserQuestionTool(payload.toolName)) {
+        getDashboardPopoutWindow()?.webContents.send('agentStatus:set', statusEvent)
+      }
       recordAgentStateCrashBreadcrumb(payload.agentType ?? 'unknown', payload.state)
       // Why: native OSC titles miss some idle/permission frames, so inject hook-derived ones to keep the renderer title tracker in sync.
       const profile = getSyntheticAgentTitleProfile(payload.agentType)
-      const suppressSyntheticCodexAutoApprovalTitle =
-        payload.agentType === 'codex' &&
-        (payload.state === 'waiting' || payload.state === 'blocked')
-          ? shouldSuppressCodexAutoApprovalSyntheticTitleFromHook({
-              agentType: payload.agentType,
-              state: payload.state,
-              launchConfig: runtime?.getAgentStatusLaunchConfigForPaneKey(paneKey, { launchToken })
-            })
-          : false
       if (
         profile &&
         shouldDriveSyntheticAgentTitleFromHook(payload.agentType, payload.state) &&
@@ -1490,6 +1499,7 @@ function openMainWindow(): BrowserWindow {
       return
     }
     mainWindow?.webContents.send('agentStatus:clear', clear)
+    getDashboardPopoutWindow()?.webContents.send('agentStatus:clear', clear)
   })
   setMigrationUnsupportedPtyListener((event) => {
     if (mainWindow?.isDestroyed()) {
@@ -2097,7 +2107,11 @@ void app.whenReady().then(async () => {
   }
   try {
     // Why: Dock/Launchpad launches don't inherit shell proxy env vars, so apply the persisted proxy before any app-owned network fetchers run.
-    await applyElectronProxySettings(store.getSettings())
+    const proxyApplyResult = await applyElectronProxySettings(store.getSettings())
+    if (proxyApplyResult.source === 'invalid-settings') {
+      // Why (STA-3442): a silent DIRECT fallback made a dead configured proxy undiagnosable.
+      console.warn('[proxy] persisted proxy settings are invalid; using direct networking')
+    }
   } catch {
     console.warn('[proxy] Failed to apply network proxy settings')
   }
@@ -2983,8 +2997,6 @@ app.on('before-quit', () => {
   isQuitting = true
   desktopRelayService?.fenceAndCloseNow()
   runtimeRpc?.setMobileRelayPairingProvider(null)
-  unsubscribeSystemResumeBroadcast?.()
-  unsubscribeSystemResumeBroadcast = null
   unsubscribeAgentAwakeStatusChanges?.()
   unsubscribeAgentAwakeStatusChanges = null
   agentAwakeService?.dispose()
@@ -3010,6 +3022,8 @@ app.on('will-quit', (e) => {
   if (!quitTeardownStartGate.tryStart(e)) {
     return
   }
+  unsubscribeSystemResumeBroadcast?.()
+  unsubscribeSystemResumeBroadcast = null
   // Why: renderer guards can still cancel before this committed phase; `log stream` must survive those vetoes.
   stopTccPromptNotice()
   const updateQuitInProgress = isQuittingForUpdate()
@@ -3046,7 +3060,9 @@ app.on('will-quit', (e) => {
   runtime?.getOffscreenBrowserBackend()?.destroyAll?.()
   browserManager.setBrowserGuestStateChangedListener(null)
   const emulatorShutdown = runtime?.getEmulatorBridge()?.destroyAllSessions() ?? Promise.resolve()
-  const sshShutdown = detachAllSshSessionsForShutdown()
+  // Why immediately before store.flushAsync() with no await in between: beginSshShutdown() marks every
+  // active SSH lease detached in memory synchronously, and that flush is what persists it.
+  const sshShutdown = beginSshShutdown()
   killAllPty()
   const watcherShutdown = shutdownWatchersOnce()
   const storeFlush = store?.flushAsync() ?? Promise.resolve()

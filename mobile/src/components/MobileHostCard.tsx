@@ -2,7 +2,7 @@ import { ChevronRight, Monitor } from 'lucide-react-native'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import type { ConnectionVerdict } from '../transport/connection-health'
 import type { MobileConnectionPath } from '../transport/stable-logical-rpc-client'
-import type { ConnectionState, HostProfile } from '../transport/types'
+import type { ConnectionState, HostCatalogEntry, HostProfile } from '../transport/types'
 import { colors, radii, spacing } from '../theme/mobile-theme'
 import { useMobileLocale } from '../localization/mobile-locale-provider'
 import type { TranslationKey } from '../localization/mobile-locale'
@@ -29,7 +29,8 @@ function connectionStatusKey(state: ConnectionState, verdict: ConnectionVerdict)
 }
 
 export function MobileHostCard(props: {
-  host: HostProfile
+  host: HostProfile | HostCatalogEntry
+  credentialStatus?: HostCatalogEntry['credentialStatus']
   state: ConnectionState
   verdict: ConnectionVerdict
   path: MobileConnectionPath
@@ -40,22 +41,37 @@ export function MobileHostCard(props: {
   onLongPress: () => void
 }) {
   const { t } = useMobileLocale()
-  const connected = props.state === 'connected'
+  const credentialUnavailable = props.credentialStatus === 'temporarily-unavailable'
+  const credentialMissing = props.credentialStatus === 'missing'
+  const connected = props.state === 'connected' && !credentialUnavailable && !credentialMissing
   // Why: a relay dial can run for seconds behind "Connecting…"/"Reconnecting…"; naming the
   // path mid-wait tells the user the phone is off-LAN rather than hung (F5). Only 'relay' is
   // named — 'lan' doubles as the unknown-path default, so it would be a guess before connect.
   const dialingPath =
     ['connecting', 'handshaking', 'reconnecting'].includes(props.state) && props.path === 'relay'
-  const isError = ['warning', 'unreachable', 'auth-failed'].includes(props.verdict.kind)
-  const statusLabel = t(connectionStatusKey(props.state, props.verdict))
+  const isError =
+    credentialMissing || ['warning', 'unreachable', 'auth-failed'].includes(props.verdict.kind)
+  const statusLabel = credentialMissing
+    ? t('host.pairingInvalidStatus')
+    : credentialUnavailable
+      ? t('host.pairingTemporarilyUnavailable')
+      : t(connectionStatusKey(props.state, props.verdict))
   const displayStatus =
-    (props.verdict.kind === 'warning' || props.verdict.kind === 'unreachable') && props.verdict.hint
+    !credentialMissing &&
+    !credentialUnavailable &&
+    (props.verdict.kind === 'warning' || props.verdict.kind === 'unreachable') &&
+    props.verdict.hint
       ? t('host.statusWithHint', {
           status: statusLabel,
           hint:
             props.verdict.hint === 'check Tailscale' ? t('host.checkTailscale') : props.verdict.hint
         })
       : statusLabel
+  const statusVerdict: ConnectionVerdict = credentialMissing
+    ? { kind: 'auth-failed', label: statusLabel }
+    : credentialUnavailable
+      ? { kind: 'warning', label: statusLabel }
+      : props.verdict
   const connectionPath =
     props.path === 'relay'
       ? t('host.pathRelay')
@@ -86,10 +102,19 @@ export function MobileHostCard(props: {
           {props.host.name}
         </Text>
         <View style={styles.meta}>
-          <StatusDot state={props.state} verdict={props.verdict} />
-          <Text style={[styles.metaText, isError && { color: colors.statusRed }]} numberOfLines={1}>
+          <StatusDot state={props.state} verdict={statusVerdict} />
+          <Text
+            style={[
+              styles.metaText,
+              isError && { color: colors.statusRed },
+              credentialUnavailable && { color: colors.statusAmber }
+            ]}
+            numberOfLines={1}
+          >
             {displayStatus}
-            {connected || dialingPath ? ` · ${connectionPath}` : ''}
+            {!credentialMissing && !credentialUnavailable && (connected || dialingPath)
+              ? ` · ${connectionPath}`
+              : ''}
           </Text>
         </View>
         {connected && worktreeSummary ? (
@@ -100,6 +125,11 @@ export function MobileHostCard(props: {
         {props.verdict.kind === 'unreachable' && !props.host.relay ? (
           <Text style={styles.discoveryHint} numberOfLines={2}>
             {t('host.discoveryHint')}
+          </Text>
+        ) : null}
+        {credentialMissing || credentialUnavailable ? (
+          <Text style={styles.discoveryHint} numberOfLines={2}>
+            {credentialMissing ? t('host.repairHint') : t('host.unlockRetryHint')}
           </Text>
         ) : null}
       </View>

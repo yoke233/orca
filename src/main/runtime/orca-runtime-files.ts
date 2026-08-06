@@ -25,6 +25,7 @@ import {
   resolveRuntimePath
 } from '../../shared/cross-platform-path'
 import { PhysicalExitTracker } from '../../shared/physical-exit-tracker'
+import { sortDirEntries } from '../../shared/file-name-sort'
 import type {
   RuntimeFileListResult,
   RuntimeFileOpenResult,
@@ -1279,7 +1280,9 @@ export class RuntimeFileCommands {
       if (!provider) {
         throw new Error(SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE)
       }
-      return provider.readDir(target.path)
+      // Why: re-sort locally — the remote relay may be an older build with
+      // lexicographic ordering.
+      return sortDirEntries(await provider.readDir(target.path))
     }
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
@@ -1294,12 +1297,7 @@ export class RuntimeFileCommands {
         }
       })
     )
-    return mapped.sort((a, b) => {
-      if (a.isDirectory !== b.isDirectory) {
-        return a.isDirectory ? -1 : 1
-      }
-      return a.name.localeCompare(b.name)
-    })
+    return sortDirEntries(mapped)
   }
 
   async watchFileExplorer(

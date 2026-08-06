@@ -10,7 +10,7 @@ import { OrcaLogo } from '../src/components/OrcaLogo'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { getNotificationNavigationTarget } from '../src/notifications/notification-routing'
 import { useOpenNotificationRoute } from '../src/notifications/use-open-notification-route'
-import { loadHosts } from '../src/transport/host-store'
+import { loadHostCatalog } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
 import { MobileLocaleProvider } from '../src/localization/mobile-locale-provider'
@@ -104,9 +104,12 @@ function RootNavigator() {
     }
 
     async function getNavigationTarget(data: unknown) {
-      const hosts = await loadHosts().catch(() => null)
+      const hosts = await loadHostCatalog().catch(() => null)
       return getNotificationNavigationTarget(data, {
-        knownHostIds: hosts ? new Set(hosts.map((host) => host.id)) : undefined
+        knownHostIds: hosts ? new Set(hosts.map((host) => host.id)) : undefined,
+        credentialStatusByHostId: hosts
+          ? new Map(hosts.map((host) => [host.id, host.credentialStatus]))
+          : undefined
       })
     }
 

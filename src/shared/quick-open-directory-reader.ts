@@ -1,4 +1,5 @@
 import * as nodeFsPromises from 'node:fs/promises'
+import { compareFileNames } from './file-name-sort'
 import { isFileListingCancellation, throwIfFileListingCancelled } from './file-listing-cancellation'
 import { isQuickOpenReadableDirectory } from './quick-open-directory-validation'
 import {
@@ -50,7 +51,7 @@ export async function readQuickOpenDirectoryEntries(opts: {
               : 'other'
       })
     }
-    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+    entries.sort((left, right) => compareFileNames(left.name, right.name))
 
     // Why: discard buffered names if the path became a symlink while its
     // directory handle was open; descendants must never escape the root.

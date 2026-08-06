@@ -10,7 +10,12 @@ import type {
 } from '../shared/hosted-review'
 import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { BrowserFindSource } from '../shared/browser-find-source'
-import type { DashboardSnapshot, DashboardRevealAgentArgs } from '../shared/dashboard-snapshot'
+import type {
+  DashboardRevealAgentArgs,
+  DashboardSleepWorkspaceArgs,
+  DashboardSnapshot,
+  DashboardSpawnAgentArgs
+} from '../shared/dashboard-snapshot'
 import type {
   TerminalPreviewConnectResult,
   TerminalPreviewDataPayload
@@ -30,8 +35,10 @@ import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type { AppIdentity } from '../shared/app-identity'
 import type { ReleaseChannel } from '../shared/release-channel'
 import type {
+  HostQualifiedKnownWorktreeResult,
   HostQualifiedDetectedWorktreeResult,
   LegacyDetectedWorktreeRequest,
+  ListKnownWorktreesForExecutionHostArgs,
   ListDetectedWorktreesArgs,
   ProviderRequestId
 } from '../shared/detected-worktree-provider-contract'
@@ -330,7 +337,10 @@ import type {
   UpdatePullRequestBySlugArgs,
   UpdateProjectItemFieldArgs
 } from '../shared/github-project-types'
-import type { RichMarkdownContextMenuCommandPayload } from '../shared/rich-markdown-context-menu'
+import type {
+  RichMarkdownContextMenuCommandPayload,
+  RichMarkdownContextMenuTableTarget
+} from '../shared/rich-markdown-context-menu'
 import type {
   BrowserSetGrabModeArgs,
   BrowserSetGrabModeResult,
@@ -1396,6 +1406,9 @@ export type PreloadApi = {
       ): Promise<HostQualifiedDetectedWorktreeResult | DetectedWorktreeListResult>
       (args: LegacyDetectedWorktreeRequest): Promise<DetectedWorktreeListResult>
     }
+    listKnownForExecutionHost?: (
+      args: ListKnownWorktreesForExecutionHostArgs
+    ) => Promise<HostQualifiedKnownWorktreeResult>
     cancelListDetected?: (args: { providerRequestId: ProviderRequestId }) => Promise<void>
     listAll: () => Promise<Worktree[]>
     create: (args: CreateWorktreeArgs) => Promise<CreateWorktreeResult>
@@ -2489,17 +2502,22 @@ export type PreloadApi = {
     ) => Promise<OnboardingState>
   }
   dashboard: {
-    openPopout: () => Promise<void>
+    openPopout: (view?: 'board' | 'map') => Promise<void>
     publishSnapshot: (snapshot: DashboardSnapshot) => Promise<void>
     getPopoutOpen: () => Promise<boolean>
     onPopoutOpenChanged: (callback: (open: boolean) => void) => () => void
     onSnapshotRequested: (callback: () => void) => () => void
     onRevealAgent: (callback: (args: DashboardRevealAgentArgs) => void) => () => void
     onAckAgent: (callback: (paneKey: string) => void) => () => void
+    onSpawnAgent: (callback: (args: DashboardSpawnAgentArgs) => void) => () => void
+    onSleepWorkspace: (callback: (args: DashboardSleepWorkspaceArgs) => void) => () => void
     requestSnapshot: () => Promise<void>
     onSnapshot: (callback: (snapshot: DashboardSnapshot) => void) => () => void
+    onViewRequested: (callback: (view: 'board' | 'map') => void) => () => void
     revealAgent: (args: DashboardRevealAgentArgs) => Promise<void>
     ackAgent: (paneKey: string) => Promise<void>
+    spawnAgent: (args: DashboardSpawnAgentArgs) => Promise<void>
+    sleepWorkspace: (args: DashboardSleepWorkspaceArgs) => Promise<void>
   }
   terminalPreview: {
     connect: (
@@ -2895,9 +2913,19 @@ export type PreloadApi = {
       includeIgnored?: boolean
       bypassEffectiveUpstreamNegativeCache?: boolean
       reuseLineStats?: boolean
+      /** Merge-base OID to measure the branch line total against; omit to skip the work. */
+      branchLineTotalMergeBase?: string
       requestToken?: string
     }) => Promise<GitStatusResult>
     cancelStatus: (args: { requestToken: string }) => Promise<void>
+    setStatusUpstreamRefWatch: (args: {
+      worktreeId: string
+      worktreePath: string
+      executionHostId: string
+      connectionId?: string
+      branch?: string
+      upstreamName?: string
+    }) => Promise<void>
     submoduleStatus: (args: {
       worktreePath: string
       submodulePath: string
@@ -3301,6 +3329,7 @@ export type PreloadApi = {
     setZoomLevel: (level: number) => void
     syncTrafficLights: (zoomFactor: number) => void
     setMarkdownEditorFocused: (focused: boolean) => void
+    setRichMarkdownContextMenuTarget: (target: RichMarkdownContextMenuTableTarget | null) => void
     setTerminalInputFocused: (focused: boolean) => void
     setFloatingFocus: (state: { panelFocused: boolean; terminalFocused: boolean }) => void
     setShortcutRecorderFocused: (focused: boolean) => void

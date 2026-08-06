@@ -17,100 +17,22 @@ import { useMobileLocale } from '../localization/mobile-locale-provider'
 import { styles } from './mobile-native-chat-view-styles'
 import {
   buildMobileNativeChatTransientData,
-  mobileNativeChatEmptyState,
-  type MobileNativeChatPendingItem
+  mobileNativeChatEmptyState
 } from './mobile-native-chat-render-data'
 import { useMobileNativeChatPinchGesture } from './use-mobile-native-chat-pinch-gesture'
 import { useMobileNativeChatScroll } from './use-mobile-native-chat-scroll'
 import { MobileAgentWorkingIndicator } from './MobileAgentWorkingIndicator'
-import type { PendingNativeChatImage } from './mobile-native-chat-image-attachment'
 import { MobileNativeChatComposer } from './MobileNativeChatComposer'
-import type { MobileNativeChatSessionOptionPickersProps } from './MobileNativeChatSessionOptionPickers'
 import { MobileNativeChatMessage } from './MobileNativeChatMessage'
 import { MobileNativeChatAsk } from './MobileNativeChatAsk'
-import type { AskAnswerSelection, AskPrompt } from './mobile-native-chat-ask'
 import { MobileNativeChatPermission } from './MobileNativeChatPermission'
-import type { MobileChatPermission } from './mobile-native-chat-permission'
 import { MobileNativeChatQuestion } from './MobileNativeChatQuestion'
-import { mobileChatQuestionKey, type MobileChatQuestion } from './mobile-native-chat-question'
-import type { MobileNativeChatStatus } from './use-mobile-native-chat-session'
+import { mobileChatQuestionKey } from './mobile-native-chat-question'
+import type { MobileNativeChatViewProps } from './mobile-native-chat-view-contract'
 
-/** Why the composer input is locked: the transport is disconnected, or the
- *  terminal subscription has not acknowledged its input lease yet. */
-export type MobileNativeChatInputLockReason = 'disconnected' | 'waiting'
+export type { MobileNativeChatInputLockReason } from './mobile-native-chat-view-contract'
 
-type Props = {
-  sessionKey: string
-  /** Raw transcript, only for telling "still loading" from "loaded and empty". */
-  messages: NativeChatMessage[]
-  /** `messages` with noise stripped and tool turns folded in, from the overlay. */
-  folded: NativeChatMessage[]
-  status: MobileNativeChatStatus
-  error?: string
-  /** Resolved agent for this chat; names the empty-state copy (desktop parity). */
-  agent?: string | null
-  agentWorking?: boolean
-  /** Interrupt the agent mid-turn (shown as a Stop button on the working bar). */
-  onStop?: () => void
-  /** Live partial assistant text to show as an in-progress bubble, already gated
-   *  by the overlay against the transcript catching up. */
-  streaming: string | null
-  hasMore?: boolean
-  loadingEarlier?: boolean
-  onLoadEarlier?: () => void
-  onSend: (text: string) => Promise<boolean>
-  /** Optimistic queued sends (owned by the route so they survive view switches). */
-  /** Optimistic user echoes, including any ridden-along image preview URIs. */
-  pending: MobileNativeChatPendingItem[]
-  /** Controlled composer text (owned by the route so dictation can write to it). */
-  composerText: string
-  onComposerTextChange: (text: string) => void
-  onAttachImage?: () => void
-  /** Pending image attachments shown as composer thumbnails until the next send. */
-  attachments?: PendingNativeChatImage[]
-  onRemoveAttachment?: (id: string) => void
-  isAttaching?: boolean
-  onMicPress?: () => void
-  micActive?: boolean
-  dictationMode?: 'toggle' | 'hold'
-  onMicPressIn?: () => void
-  onMicPressOut?: () => void
-  inputLockReason?: MobileNativeChatInputLockReason | null
-  /** Route-reported send failure (answer cards, permission replies, stop). Shares the
-   *  inline banner with a rejected composer send, so one failure paints once. The
-   *  route routes these here only while this view is mounted, and falls back to its
-   *  toast otherwise — a deferred failure must not land on an unmounted banner. */
-  sendErrorMessage?: string | null
-  /** Clears `sendErrorMessage` once a later send is accepted. */
-  onClearSendError?: () => void
-  filePaths?: string[]
-  onNeedFiles?: (query: string) => void
-  /** Model/session-option pickers for the composer action row (desktop parity). */
-  sessionOptions?: MobileNativeChatSessionOptionPickersProps | null
-  /** A pending agent question/permission detected from live status, shown as a
-   *  native card above the composer; answering sends text to the agent. */
-  /** Structured AskUserQuestion prompt parsed from the transcript (preferred over
-   *  the heuristic question card). */
-  ask?: AskPrompt | null
-  /** Stable key for the ask card. Dismissal state lives in the controller (it
-   *  must survive this subtree unmounting on a chat↔terminal toggle). */
-  askKey?: string | null
-  /** Hide the answered/dismissed ask until a different question arrives. */
-  onDismissAsk?: () => void
-  /** Deliver the ask answer as per-question selections; the send hook turns them
-   *  into selector keystrokes (Claude) or pasted label text (other agents). */
-  onAnswerAsk?: (prompt: AskPrompt, selections: AskAnswerSelection[]) => Promise<boolean>
-  onCancelAsk?: () => Promise<boolean>
-  question?: MobileChatQuestion | null
-  onAnswerQuestion?: (text: string) => Promise<boolean>
-  permission?: MobileChatPermission | null
-  onRespondPermission?: (send: string) => Promise<boolean>
-  /** Open a worktree file tapped in agent markdown. */
-  onOpenFile?: (relativePath: string) => void
-  /** Pixels to lift the composer by when the soft keyboard is open. The route
-   *  owns keyboard tracking (the app uses manual lift, not KeyboardAvoidingView). */
-  keyboardInset?: number
-}
+const INPUT_LOCK_SETTLE_MS = 600
 
 export function MobileNativeChatView({
   sessionKey,
@@ -127,6 +49,7 @@ export function MobileNativeChatView({
   onLoadEarlier,
   onSend,
   pending,
+  imagePreviewsByMessageId,
   composerText,
   onComposerTextChange,
   onAttachImage,
@@ -155,7 +78,7 @@ export function MobileNativeChatView({
   onRespondPermission,
   onOpenFile,
   keyboardInset = 0
-}: Props): React.JSX.Element {
+}: MobileNativeChatViewProps): React.JSX.Element {
   const insets = useSafeAreaInsets()
   const { t } = useMobileLocale()
   const listRef = useRef<FlatList<NativeChatMessage>>(null)
@@ -170,8 +93,14 @@ export function MobileNativeChatView({
   // route-owned optimistic queued messages. Memoize on the same deps so the
   // downstream autoscroll effects/`renderItem` keep referential stability.
   const { data } = useMemo(
-    () => buildMobileNativeChatTransientData({ folded, streaming, pending }),
-    [folded, streaming, pending]
+    () =>
+      buildMobileNativeChatTransientData({
+        folded,
+        streaming,
+        pending,
+        imagePreviewsByMessageId
+      }),
+    [folded, streaming, pending, imagePreviewsByMessageId]
   )
   const {
     showJumpToLatest,
@@ -239,20 +168,18 @@ export function MobileNativeChatView({
   const emptyState = mobileNativeChatEmptyState(status, agent ?? null, error)
   const showLoading = status === 'loading' && messages.length === 0
 
-  // Composer-lock flicker guard: on a remote link, brief connState blips or lease
-  // hand-offs would otherwise toggle the lock placeholder on and off. Only surface
-  // a lock once it has held ~600ms; drop it instantly so unlocking stays snappy.
+  // A dead PTY emits subscribed→end; settle both edges so its false lease cannot flash the composer enabled.
   const rawLockReason = inputLockReason ?? null
+  const rawLockHeld = rawLockReason !== null
   const [lockHeld, setLockHeld] = useState(false)
   useEffect(() => {
-    if (rawLockReason === null) {
-      setLockHeld(false)
+    if (rawLockHeld === lockHeld) {
       return
     }
-    const timer = setTimeout(() => setLockHeld(true), 600)
+    const timer = setTimeout(() => setLockHeld(rawLockHeld), INPUT_LOCK_SETTLE_MS)
     return () => clearTimeout(timer)
-  }, [rawLockReason])
-  const lockReason = lockHeld ? rawLockReason : null
+  }, [lockHeld, rawLockHeld])
+  const lockReason = lockHeld ? (rawLockReason ?? 'waiting') : null
 
   return (
     <View style={[styles.root, { paddingBottom: bottomPad }]}>
