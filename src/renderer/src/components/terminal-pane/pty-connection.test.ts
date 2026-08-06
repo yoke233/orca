@@ -17397,10 +17397,17 @@ describe('connectPanePty', () => {
 
       mockStoreState.paneForegroundAgentByPaneKey[makePaneKey('tab-1', LEAF_1)] = {
         agent: null,
+        shellForeground: false
+      }
+      expect(handler?.([2])).toBe(true)
+      expect(scroll).toHaveBeenCalledTimes(4)
+
+      mockStoreState.paneForegroundAgentByPaneKey[makePaneKey('tab-1', LEAF_1)] = {
+        agent: null,
         shellForeground: true
       }
       expect(handler?.([2])).toBe(false)
-      expect(scroll).toHaveBeenCalledTimes(2)
+      expect(scroll).toHaveBeenCalledTimes(4)
       binding.dispose()
     } finally {
       restoreNavigator()

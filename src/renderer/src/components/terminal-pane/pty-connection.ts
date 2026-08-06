@@ -3916,8 +3916,11 @@ export function connectPanePty(
         }
         const currentState = useAppStore.getState()
         const foreground = currentState.paneForegroundAgentByPaneKey[cacheKey]
-        if (foreground) {
-          return foreground.agent === 'codex' && !foreground.shellForeground
+        if (foreground?.shellForeground) {
+          return false
+        }
+        if (foreground?.agent) {
+          return foreground.agent === 'codex'
         }
         const status = currentState.agentStatusByPaneKey[cacheKey]
         return status?.agentType === 'codex' || getAuthoritativePaneAgent() === 'codex'
