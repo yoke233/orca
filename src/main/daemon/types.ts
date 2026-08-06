@@ -3,7 +3,6 @@ import type {
   GetForegroundProcessRequest,
   InspectProcessRequest
 } from './daemon-foreground-process-protocol'
-
 export type {
   ConfirmForegroundProcessRequest,
   GetForegroundProcessRequest,
@@ -62,6 +61,7 @@ export type CreateOrAttachRequest = {
     sessionId: string
     cols: number
     rows: number
+    scrollbackRows?: number
     cwd?: string
     env?: Record<string, string>
     envToDelete?: string[]

@@ -163,6 +163,19 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
       expect(result.providerSequence).toEqual({ value: 0, generation: 'reset' })
     })
 
+    it('retains the requested scrollback depth through the daemon RPC', async () => {
+      const { id } = await adapter.spawn({ cols: 80, rows: 2, scrollbackRows: 6_000 })
+      lastSubprocess._simulateData(
+        Array.from({ length: 5_100 }, (_, index) => `line-${index}\r\n`).join('')
+      )
+
+      await expect(adapter.getBufferSnapshot(id, { scrollbackRows: 6_000 })).resolves.toMatchObject(
+        {
+          data: expect.stringContaining('line-0')
+        }
+      )
+    })
+
     it('carries classified startup spans from the daemon source to the adapter', async () => {
       const onData = vi.fn()
       adapter.onData(onData)

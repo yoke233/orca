@@ -3190,6 +3190,7 @@ describe('registerPtyHandlers', () => {
         env: Record<string, string>
         envToDelete?: string[]
         isNewSession?: boolean
+        scrollbackRows?: number
         shellOverride?: string
         terminalWindowsWslDistro?: string | null
         terminalWindowsPowerShellImplementation?: string
@@ -3244,6 +3245,7 @@ describe('registerPtyHandlers', () => {
           enableGitHubAttribution?: boolean
           httpProxyUrl?: string
           httpProxyBypassRules?: string
+          terminalScrollbackRows?: number
         },
         processEnvOverrides?: Record<string, string | undefined>,
         // Why: daemon spawn tests exercise both WSL launch metadata from main and PR #2662 command threading for OMP.
@@ -3327,6 +3329,14 @@ describe('registerPtyHandlers', () => {
           )
         ).env
       }
+
+      it('forwards the configured scrollback depth to daemon spawns', async () => {
+        const spawnOptions = await daemonSpawnAndGetOptions(undefined, undefined, () => ({
+          terminalScrollbackRows: 25_000
+        }))
+
+        expect(spawnOptions.scrollbackRows).toBe(25_000)
+      })
 
       it('waits for managed Codex auth before spawning a daemon PTY', async () => {
         vi.useFakeTimers()

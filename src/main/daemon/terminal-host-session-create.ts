@@ -1,5 +1,6 @@
 import { buildStartupCommandSubmission } from '../../shared/startup-command-submission'
 import { resolvePtyOwnerBackend } from '../../shared/pty-owner-backend'
+import { normalizeDesktopTerminalScrollbackRows } from '../../shared/terminal-scrollback-policy'
 import { getDaemonSessionResultMetadata } from './daemon-create-or-attach-result'
 import { normalizePtySize } from './daemon-pty-size'
 import { Session } from './session'
@@ -101,6 +102,7 @@ export async function createOrAttachTerminalSession(
     terminalHandle: opts.env?.ORCA_TERMINAL_HANDLE,
     launchAgent: opts.launchAgent,
     subprocess,
+    scrollback: normalizeDesktopTerminalScrollbackRows(opts.scrollbackRows),
     ownerBackend: resolvePtyOwnerBackend({
       platform: process.platform,
       shellPath: subprocess.shellPath,

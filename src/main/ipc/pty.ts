@@ -19,7 +19,10 @@ import { retireTerminalSurfaceFromPersistence } from '../runtime/mobile-session-
 import type { GlobalSettings, TuiAgent } from '../../shared/types'
 import { toSshExecutionHostId } from '../../shared/execution-host'
 import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
-import { terminalOutputBacklogCapChars } from '../../shared/terminal-scrollback-policy'
+import {
+  normalizeDesktopTerminalScrollbackRows,
+  terminalOutputBacklogCapChars
+} from '../../shared/terminal-scrollback-policy'
 import type {
   PtyDeliveryWriteOff,
   PtyRendererDeliveryHealthReply,
@@ -4557,6 +4560,9 @@ export function registerPtyHandlers(
       const spawnOptions: PtySpawnOptions = {
         cols: args.cols,
         rows: args.rows,
+        scrollbackRows: normalizeDesktopTerminalScrollbackRows(
+          getSettings?.().terminalScrollbackRows
+        ),
         cwd,
         env,
         ...(isNewDaemonSession ? { isNewSession: true } : {})
@@ -6055,6 +6061,9 @@ export function registerPtyHandlers(
         const spawnOptions: PtySpawnOptions = {
           cols: args.cols,
           rows: args.rows,
+          scrollbackRows: normalizeDesktopTerminalScrollbackRows(
+            getSettings?.().terminalScrollbackRows
+          ),
           cwd,
           env: spawnEnv,
           ...(isMintedSessionId ? { isNewSession: true } : {})

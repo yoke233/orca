@@ -511,6 +511,7 @@ export class DaemonPtyAdapter implements IPtyProvider {
         sessionId,
         cols: effectiveCols,
         rows: effectiveRows,
+        scrollbackRows: attachOnly ? undefined : opts.scrollbackRows,
         cwd: attachOnly ? undefined : effectiveCwd,
         env: attachOnly ? undefined : opts.env,
         envToDelete: attachOnly ? undefined : opts.envToDelete,

@@ -909,6 +909,7 @@ export class DaemonServer {
             sessionId: p.sessionId,
             cols: p.cols,
             rows: p.rows,
+            scrollbackRows: p.scrollbackRows,
             cwd: p.cwd,
             env: p.env,
             envToDelete: p.envToDelete,

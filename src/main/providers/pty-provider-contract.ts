@@ -35,6 +35,8 @@ export type PtyProviderBufferSnapshot = {
 export type PtySpawnOptions = {
   cols: number
   rows: number
+  /** User-selected history depth retained by daemon-owned terminal models. */
+  scrollbackRows?: number
   cwd?: string
   env?: Record<string, string>
   envToDelete?: string[]
