@@ -22,6 +22,7 @@ export const simplifiedChinese = {
   'home.resume': '继续',
   'home.quickActions': '快捷操作',
   'home.newWorkspace': '新建工作区',
+  'home.createWorkspaceOn': '在所选主机上新建工作区',
   'home.accountUsage': '账户用量',
   'home.systemDefault': '系统默认',
   'home.connect': '连接',

@@ -167,6 +167,10 @@ import { recordTerminalOutput } from '@/lib/pane-manager/pane-scroll'
 import { ensureArabicShapingJoinerForText } from '@/lib/pane-manager/terminal-arabic-shaping-joiner'
 import { clearTerminalScrollbackAndFollowOutput } from '@/lib/pane-manager/terminal-scrollback-clear'
 import {
+  installTerminalLiveScrollbackRestore,
+  type TerminalLiveScrollbackRestore
+} from '@/lib/pane-manager/terminal-live-scrollback-restore'
+import {
   enforceTerminalCurrentScrollIntent,
   getTerminalScrollIntentKind,
   markTerminalFollowOutput,
@@ -4486,6 +4490,7 @@ export function connectPanePty(
   // override, which legitimately parks the PTY at phone dims). See
   // pty-size-reconcile.ts for the convergence loop.
   let ptySizeReconcileHandle: PtySizeReconcileHandle | null = null
+  let liveScrollbackRestore: TerminalLiveScrollbackRestore | null = null
   const reconcilePtySizeAfterSpawn = (
     ptyId: string,
     spawnCols: number,
@@ -6423,6 +6428,12 @@ export function connectPanePty(
       deps.paneLastThemeModeRef.current.set(pane.id, mode)
       recordHiddenMode2031Reply()
     }
+
+    // Why installed here: the handler observes CSI 3 J inside xterm's parse, so a
+    // redraw split across PTY chunks is reported once, with the pane's rows for
+    // this write already applied.
+    liveScrollbackRestore?.dispose()
+    liveScrollbackRestore = installTerminalLiveScrollbackRestore(pane.terminal)
 
     function writePtyOutputToXterm(
       data: string,
@@ -9344,6 +9355,8 @@ export function connectPanePty(
       unregisterUndeliverableWriteHandler()
       unsubscribeRemoteDesktopActivationClaim()
       cancelHiddenOutputSnapshotScrollRestore()
+      liveScrollbackRestore?.dispose()
+      liveScrollbackRestore = null
       structuralReplayCoordinator.dispose()
       cancelFreshSpawnFollowReset()
       // Why: cancel the post-spawn reconcile's pending rAF so a torn-down pane can't keep fitting/resizing after disposal.

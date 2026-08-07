@@ -20,6 +20,7 @@ export const english = {
   'home.resume': 'Resume',
   'home.quickActions': 'Quick Actions',
   'home.newWorkspace': 'New Workspace',
+  'home.createWorkspaceOn': 'Create Workspace On',
   'home.accountUsage': 'Account usage',
   'home.systemDefault': 'System default',
   'home.connect': 'Connect',
