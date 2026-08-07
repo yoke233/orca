@@ -1,8 +1,8 @@
 export { FrameType } from './types'
 import type { FrameType } from './types'
-import { FRAME_HEADER_SIZE, FRAME_MAX_PAYLOAD } from './types'
 
-export { FRAME_HEADER_SIZE }
+export const FRAME_HEADER_SIZE = 5
+const FRAME_MAX_PAYLOAD = 1024 * 1024
 
 export function encodeFrame(type: FrameType, payload: Buffer): Buffer {
   if (payload.length > FRAME_MAX_PAYLOAD) {

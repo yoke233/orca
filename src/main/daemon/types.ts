@@ -397,9 +397,6 @@ export const enum FrameType {
   Signal = 0x06
 }
 
-export const FRAME_HEADER_SIZE = 5
-export const FRAME_MAX_PAYLOAD = 1024 * 1024 // 1MB
-
 // ─── Notify prefix ──────────────────────────────────────────────────
 // Requests with IDs starting with this prefix are fire-and-forget:
 // the daemon processes them but does not send a response.
