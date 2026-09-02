@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
-import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { authorizeExternalPath } from './filesystem-auth'
 import { isENOENT } from './filesystem-path-containment'
 import type {
@@ -22,9 +22,9 @@ export async function stageOneSourceForRuntimeUpload(
   // authorize before lstat/readFile just like local copy imports.
   authorizeExternalPath(resolvedSource)
 
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }
@@ -76,10 +76,10 @@ export async function stageOneSourceForRuntimeUpload(
 async function stageDirectoryEntries(rootPath: string): Promise<StagedExternalImportEntry[]> {
   const entries: StagedExternalImportEntry[] = [{ relativePath: '', kind: 'directory' }]
   let totalBytes = 0
-  const rootRealPath = await realpath(rootPath)
+  const rootRealPath = await workspaceFsPromises.realpath(rootPath)
 
   async function visit(dirPath: string): Promise<void> {
-    const dirStat = await lstat(dirPath)
+    const dirStat = await workspaceFsPromises.lstat(dirPath)
     if (dirStat.isSymbolicLink()) {
       throw new RuntimeUploadSymlinkError(
         `Symlink not allowed in '${normalizeRelativeUploadPath(relative(rootPath, dirPath))}'`
@@ -95,7 +95,7 @@ async function stageDirectoryEntries(rootPath: string): Promise<StagedExternalIm
       dirPath,
       normalizeRelativeUploadPath(relative(rootPath, dirPath))
     )
-    const dirEntries = await readdir(dirPath, { withFileTypes: true })
+    const dirEntries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     for (const entry of dirEntries) {
       const childPath = join(dirPath, entry.name)
       const childRelativePath = normalizeRelativeUploadPath(relative(rootPath, childPath))
@@ -128,7 +128,7 @@ async function stageFileEntry(
   relativePath: string,
   options?: { rootRealPath?: string; totalBytesBefore?: number }
 ): Promise<{ entry: StagedExternalImportEntry; byteLength: number }> {
-  const statResult = await lstat(filePath)
+  const statResult = await workspaceFsPromises.lstat(filePath)
   const displayPath = normalizeRelativeUploadPath(relativePath)
   if (statResult.isSymbolicLink()) {
     throw new RuntimeUploadSymlinkError(`Symlink not allowed in '${displayPath}'`)
@@ -144,7 +144,10 @@ async function stageFileEntry(
       ? statResult.size
       : options.totalBytesBefore + statResult.size
   assertRemoteUploadBudget(relativePath, statResult.size, initialTotalBytes)
-  const fileHandle = await open(filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const fileHandle = await workspaceFsPromises.open(
+    filePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+  )
   try {
     const openedStat = await fileHandle.stat()
     if (!openedStat.isFile()) {
@@ -185,7 +188,7 @@ async function assertRealPathInsideRoot(
   candidatePath: string,
   displayPath: string
 ): Promise<void> {
-  const candidateRealPath = await realpath(candidatePath)
+  const candidateRealPath = await workspaceFsPromises.realpath(candidatePath)
   const relativeToRoot = relative(rootRealPath, candidateRealPath)
   // Why: `..name` is a valid child path; only `..` and `../...` escape.
   if (

@@ -1,9 +1,9 @@
 import { runProcess } from '../shared/child-process/run-process'
-import { lstat, readFile } from 'node:fs/promises'
 import { buildWslExecArgs, quotePosixShell } from '../shared/wsl-login-shell-command'
 import { removeHostTree } from './host-tree-removal'
 import { toLinuxPath } from './wsl'
 import type { ReadPath, StatPath } from './worktree-orphan-gitdir-proof'
+import { workspaceFsPromises } from './workspace-filesystem'
 
 export { toHostFilesystemPath, toHostRemovalPath } from './host-tree-removal'
 
@@ -70,8 +70,8 @@ export function getLocalWorktreePathAccess(
   const distro = options.wslDistro?.trim()
   if (!shouldUseWslFilesystem(options) || !distro) {
     return {
-      statPath: lstat,
-      readPath: (path) => readFile(path, 'utf8')
+      statPath: workspaceFsPromises.lstat,
+      readPath: (path) => workspaceFsPromises.readFile(path, 'utf8')
     }
   }
 

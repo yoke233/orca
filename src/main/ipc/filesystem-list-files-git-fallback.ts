@@ -16,14 +16,9 @@ import {
   parseQuickOpenGitLsFilesEntry
 } from '../../shared/quick-open-readdir-walk'
 import { fileListingCancellationError } from '../../shared/file-listing-cancellation'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
-/**
- * Fallback file lister using git ls-files. Used when rg is not available.
- *
- * Why two git ls-files calls: the first lists tracked + untracked-but-not-ignored
- * files (mirrors rg --files --hidden with gitignore respect). The second
- * surfaces ignored files (mirrors the second rg call with --no-ignore-vcs).
- */
+// Two git passes mirror rg's normal and ignored file inventories when rg is unavailable.
 async function isInsideGitWorkTree(
   rootPath: string,
   localGitOptions: { wslDistro?: string },
@@ -110,6 +105,7 @@ export async function listFilesWithGit(
     return listQuickOpenFilesWithReaddir(rootPath, {
       excludePathPrefixes,
       budget: createQuickOpenReaddirBudget(),
+      filesystem: workspaceFsPromises,
       maxResults,
       signal
     })
@@ -128,8 +124,7 @@ export async function listFilesWithGit(
   const scanController = new AbortController()
 
   const runGitLsFiles = async (args: string[]): Promise<void> => {
-    // Why: git ls-files outputs paths relative to cwd, so we set cwd to
-    // rootPath and use the output directly — no prefix stripping needed.
+    // Git emits cwd-relative paths, so no prefix stripping is needed.
     const child = await gitSpawnAfterWindowsEnvironmentReady(['ls-files', ...args], {
       cwd: rootPath,
       admissionTier: 'interactive',
@@ -313,10 +308,7 @@ export async function listFilesWithGit(
   } catch (err) {
     scanController.abort(err)
     killSurvivors()
-    if (signal?.aborted) {
-      throw fileListingCancellationError(signal)
-    }
-    throw err
+    throw signal?.aborted ? fileListingCancellationError(signal) : err
   } finally {
     signal?.removeEventListener('abort', onAbort)
   }
@@ -326,10 +318,10 @@ export async function listFilesWithGit(
     gitPaths,
     directoryPaths,
     excludePathPrefixes,
+    filesystem: workspaceFsPromises,
     signal,
     maxResults
   })
-  // Why: directory placeholders are expanded after Git exits; restore Git's
-  // path order so empty queries and fuzzy-score ties remain stable.
+  // Restore Git order after placeholder expansion so empty queries and fuzzy ties stay stable.
   return files.sort().slice(0, maxResults)
 }

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
 import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR } from '../../shared/worktree/id'
 import type { Repo } from '../../shared/repo-types'
 import type { Worktree } from '../../shared/worktree/types'
@@ -21,6 +20,7 @@ import {
 } from './runtime-folder-workspace'
 import type { RuntimeStore } from './runtime-store-contract'
 import { gitStatusErrorMeansNotRepository } from './runtime-worktree-selection'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export async function isRuntimeWorktreePathMissing(
   repo: Repo,
@@ -95,7 +95,7 @@ export function listRuntimeFolderWorkspaces(
 
 export async function runtimePathExists(pathValue: string): Promise<boolean> {
   try {
-    await stat(pathValue)
+    await workspaceFsPromises.stat(pathValue)
     return true
   } catch (error) {
     if (isENOENT(error)) {

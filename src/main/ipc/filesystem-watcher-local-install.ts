@@ -1,5 +1,5 @@
-import { stat } from 'node:fs/promises'
 import { isWslPath } from '../wsl'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { WATCHER_IGNORE_DIRS } from './filesystem-watcher-ignore'
 import { createWslWatcher, type WatchedRoot } from './filesystem-watcher-wsl'
 import { WatcherChildCapacityError } from './parcel-watcher-child-registry'
@@ -27,7 +27,7 @@ export async function installLocalWatcher(
 ): Promise<LocalWatcherInstallResult> {
   let root: WatchedRoot
   try {
-    const s = await stat(rootPath)
+    const s = await workspaceFsPromises.stat(rootPath)
     if (!s.isDirectory()) {
       console.warn(`[filesystem-watcher] not a directory: ${rootKey}`)
       rememberUnwatchableRoot(rootKey)

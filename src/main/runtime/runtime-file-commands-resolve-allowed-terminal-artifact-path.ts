@@ -14,7 +14,6 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
-import { open } from 'node:fs/promises'
 import type {
   RuntimeFileStatLike,
   TerminalFileGrant
@@ -24,6 +23,7 @@ import type { RuntimeTerminalPathResolution } from '../../shared/runtime-types'
 import { isPathInsideOrEqual } from '../../shared/cross-platform-path'
 import { randomUUID } from 'node:crypto'
 import type { ResolvedRuntimeFileTarget } from './runtime-file-watcher-leases'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithResolveAllowedTerminalArtifactPath extends RuntimeFileCommandsWithResolveTerminalPath {
   protected async resolveAllowedTerminalArtifactPath(args: {
@@ -133,7 +133,7 @@ export class RuntimeFileCommandsWithResolveAllowedTerminalArtifactPath extends R
     absolutePath: string
   ): Promise<RuntimeFileStatLike & { isDirectory: () => boolean }> {
     await assertLocalTerminalArtifactPathStillCanonical(absolutePath)
-    const handle = await open(absolutePath, 'r')
+    const handle = await workspaceFsPromises.open(absolutePath, 'r')
     try {
       return handle.stat()
     } finally {

@@ -1,4 +1,3 @@
-import { lstat, opendir } from 'node:fs/promises'
 import { platform } from 'node:process'
 import type { Dirent } from 'node:fs'
 import type { Repo } from '../shared/repo-types'
@@ -6,6 +5,7 @@ import type { Worktree } from '../shared/worktree/types'
 import type { WorkspaceSpaceWorktree } from '../shared/workspace-space-types'
 import { compactWorkspaceSpaceItems } from '../shared/workspace-space-compaction'
 import { mapWithConcurrency } from '../shared/map-with-concurrency'
+import { workspaceFsPromises } from './workspace-filesystem'
 import {
   scanWorkspaceSpaceEntryTree,
   type WorkspaceSpaceEntryScan
@@ -48,7 +48,7 @@ async function scanLocalEntry(
     entryName: (entry) => entry.name,
     joinPath: joinWorkspaceFilesystemPath,
     classifyEntry: async (path) => {
-      const stats = await lstat(path)
+      const stats = await workspaceFsPromises.lstat(path)
       throwIfWorkspaceSpaceScanAborted(signal)
       if (stats.isSymbolicLink()) {
         return { kind: 'symlink', sizeBytes: stats.size }
@@ -57,7 +57,7 @@ async function scanLocalEntry(
         ? { kind: 'directory', sizeBytes: stats.size }
         : { kind: 'file', sizeBytes: stats.size }
     },
-    readDirectory: (path) => opendir(path),
+    readDirectory: (path) => workspaceFsPromises.opendir(path),
     checkCancelled: () => throwIfWorkspaceSpaceScanAborted(signal),
     createCancellationError: () => new WorkspaceSpaceScanCancelledError(),
     isCancellationError: (error) => error instanceof WorkspaceSpaceScanCancelledError
@@ -72,7 +72,7 @@ async function scanLocalTopLevelEntry(
   signal?: AbortSignal
 ): Promise<WorkspaceSpaceEntryScan> {
   throwIfWorkspaceSpaceScanAborted(signal)
-  const stats = await lstat(entryPath)
+  const stats = await workspaceFsPromises.lstat(entryPath)
   throwIfWorkspaceSpaceScanAborted(signal)
   if (stats.isSymbolicLink()) {
     return { name, path: entryPath, kind: 'symlink', sizeBytes: stats.size, skippedEntryCount: 0 }
@@ -98,7 +98,7 @@ async function scanLocalWorktreeWithDu(
   signal?: AbortSignal
 ): Promise<WorkspaceSpaceWorktree> {
   throwIfWorkspaceSpaceScanAborted(signal)
-  const rootStats = await lstat(worktree.path)
+  const rootStats = await workspaceFsPromises.lstat(worktree.path)
   if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
     const root = await scanLocalEntry(
       worktree.path,
@@ -113,7 +113,7 @@ async function scanLocalWorktreeWithDu(
     })
   }
   const [entries, duSizes] = await Promise.all([
-    opendir(worktree.path).then(async (directory) => {
+    workspaceFsPromises.opendir(worktree.path).then(async (directory) => {
       const admission = await collectWorkspaceSpaceDirectoryEntries(
         directory,
         worktree.path,

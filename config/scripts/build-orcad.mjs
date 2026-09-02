@@ -77,6 +77,18 @@ const externalNativeAddons = {
   }
 }
 
+// Electron exposes original-fs for its unpatched host filesystem. Plain Node already has those
+// semantics, so the Node-only runtime binds the same workspace seam to node:fs at build time.
+const nodeOriginalFs = {
+  name: 'node-original-fs',
+  setup(pluginBuild) {
+    pluginBuild.onResolve({ filter: /^original-fs$/ }, () => ({
+      path: 'node:fs',
+      external: true
+    }))
+  }
+}
+
 rmSync(OUT_DIR, { recursive: true, force: true })
 mkdirSync(OUT_DIR, { recursive: true })
 copyFileSync(AGENT_BROWSER_SOURCE, AGENT_BROWSER_OUTPUT)
@@ -96,7 +108,7 @@ function buildForkedChild(entryPoint, outfile) {
     format: 'cjs',
     outfile,
     external: EXTERNAL,
-    plugins: [externalNativeAddons],
+    plugins: [nodeOriginalFs, externalNativeAddons],
     metafile: true,
     minify: true,
     sourcemap: false,
@@ -118,7 +130,7 @@ const result = await build({
   format: 'cjs',
   outfile: OUT_FILE,
   external: EXTERNAL,
-  plugins: [jsoncParserEsm, externalNativeAddons],
+  plugins: [jsoncParserEsm, nodeOriginalFs, externalNativeAddons],
   metafile: true,
   minify: true,
   sourcemap: false,

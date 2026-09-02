@@ -64,6 +64,7 @@ const NODE_BUILTINS = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`)
 ])
+const ELECTRON_BUILTINS = new Set(['electron', 'original-fs'])
 
 function packageNameFromSpecifier(specifier) {
   if (specifier.startsWith('@')) {
@@ -77,7 +78,7 @@ function isPackagedExternalSpecifier(specifier) {
   return (
     !specifier.startsWith('.') &&
     !specifier.startsWith('/') &&
-    specifier !== 'electron' &&
+    !ELECTRON_BUILTINS.has(specifier) &&
     !NODE_BUILTINS.has(specifier)
   )
 }

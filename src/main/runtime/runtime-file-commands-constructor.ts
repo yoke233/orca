@@ -20,10 +20,10 @@ import {
 import { rankRuntimeMobileFilePaths } from './runtime-mobile-file-path-search'
 import { isQuickOpenQueryTooLarge } from '../../shared/quick-open-path-search'
 import { searchQuickOpenFilePaths as searchHostQuickOpenFilePaths } from '../ipc/filesystem-search-file-paths'
-import { stat } from 'node:fs/promises'
 import { joinWorktreeRelativePath } from './runtime-relative-paths'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import { isENOENT } from '../ipc/filesystem-path-containment'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithConstructor extends RuntimeFileCommandsWithActiveRuntimeTextSearches {
   constructor(private readonly host: RuntimeFileCommandHost) {
@@ -179,7 +179,7 @@ export class RuntimeFileCommandsWithConstructor extends RuntimeFileCommandsWithA
     try {
       await (connectionId
         ? this.statRemoteTerminalPath(filePath, connectionId)
-        : stat(await resolveAuthorizedPath(filePath, this.host.requireStore())))
+        : workspaceFsPromises.stat(await resolveAuthorizedPath(filePath, this.host.requireStore())))
     } catch (error) {
       if (
         isENOENT(error) ||

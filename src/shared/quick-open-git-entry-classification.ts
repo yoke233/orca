@@ -1,5 +1,6 @@
-import { lstat } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
 import { join } from 'node:path'
+import type { QuickOpenFilesystem } from './quick-open-filesystem'
 
 export type QuickOpenGitEntryKind = 'keep' | 'fill-nested-repo' | 'drop-placeholder'
 
@@ -31,9 +32,9 @@ function joinQuickOpenRootPath(rootPath: string, relPath: string): string {
   return join(rootPath, ...relPath.split('/').filter(Boolean))
 }
 
-async function hasGitEntry(absPath: string): Promise<boolean> {
+async function hasGitEntry(absPath: string, filesystem: QuickOpenFilesystem): Promise<boolean> {
   try {
-    const stat = await lstat(join(absPath, '.git'))
+    const stat = await filesystem.lstat(join(absPath, '.git'))
     return stat.isDirectory() || stat.isFile()
   } catch {
     return false
@@ -42,7 +43,8 @@ async function hasGitEntry(absPath: string): Promise<boolean> {
 
 export async function classifyQuickOpenGitEntry(
   rootPath: string,
-  entry: string
+  entry: string,
+  filesystem: QuickOpenFilesystem = nodeFsPromises
 ): Promise<{ kind: QuickOpenGitEntryKind; relPath: string }> {
   const parsed = parseQuickOpenGitLsFilesEntry(entry)
   const relPath = parsed.path.replace(/\/+$/, '')
@@ -55,14 +57,14 @@ export async function classifyQuickOpenGitEntry(
 
   let stat
   try {
-    stat = await lstat(joinQuickOpenRootPath(rootPath, relPath))
+    stat = await filesystem.lstat(joinQuickOpenRootPath(rootPath, relPath))
   } catch {
     return { kind: 'drop-placeholder', relPath }
   }
   if (!stat.isDirectory()) {
     return { kind: 'drop-placeholder', relPath }
   }
-  return (await hasGitEntry(joinQuickOpenRootPath(rootPath, relPath)))
+  return (await hasGitEntry(joinQuickOpenRootPath(rootPath, relPath), filesystem))
     ? { kind: 'fill-nested-repo', relPath }
     : { kind: 'drop-placeholder', relPath }
 }

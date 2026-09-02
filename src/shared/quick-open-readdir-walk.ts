@@ -3,6 +3,7 @@ import { throwIfFileListingCancelled } from './file-listing-cancellation'
 import { readQuickOpenDirectoryEntries } from './quick-open-directory-reader'
 import { collapseQuickOpenExpansionPaths } from './quick-open-expansion-paths'
 import { classifyQuickOpenGitEntry } from './quick-open-git-entry-classification'
+import type { QuickOpenFilesystem } from './quick-open-filesystem'
 import {
   HIDDEN_DIR_BLOCKLIST,
   shouldExcludeQuickOpenRelPath,
@@ -80,6 +81,7 @@ export async function listQuickOpenFilesWithReaddir(
     excludePathPrefixes?: readonly string[]
     workspaceRelPathPrefix?: string
     budget?: QuickOpenReaddirBudget
+    filesystem?: QuickOpenFilesystem
     maxResults?: number
     signal?: AbortSignal
   } = {}
@@ -94,6 +96,7 @@ export async function listQuickOpenFilesWithReaddir(
       }
     ],
     opts.budget ?? createQuickOpenReaddirBudget(),
+    opts.filesystem,
     opts.signal,
     opts.maxResults
   )
@@ -111,6 +114,7 @@ type QuickOpenReaddirRoot = {
 async function listQuickOpenFilesFromRoots(
   roots: readonly QuickOpenReaddirRoot[],
   budget: QuickOpenReaddirBudget,
+  filesystem?: QuickOpenFilesystem,
   signal?: AbortSignal,
   maxResults?: number,
   knownFiles?: ReadonlySet<string>
@@ -151,6 +155,7 @@ async function listQuickOpenFilesFromRoots(
             absPath: pending.absPath,
             allowSymlinkedRoot: Boolean(pending.isRoot && pending.root.allowRootSymlink),
             budget,
+            filesystem,
             signal
           })
           return { pending, entries }
@@ -229,6 +234,7 @@ export async function expandQuickOpenGitFileListing(opts: {
   directoryPaths?: Iterable<string>
   excludePathPrefixes?: readonly string[]
   budget?: QuickOpenReaddirBudget
+  filesystem?: QuickOpenFilesystem
   maxResults?: number
   signal?: AbortSignal
 }): Promise<string[]> {
@@ -256,7 +262,11 @@ export async function expandQuickOpenGitFileListing(opts: {
     throwIfFileListingCancelled(opts.signal)
     assertQuickOpenReaddirDeadline(budget)
 
-    const { kind, relPath } = await classifyQuickOpenGitEntry(opts.rootPath, rawPath)
+    const { kind, relPath } = await classifyQuickOpenGitEntry(
+      opts.rootPath,
+      rawPath,
+      opts.filesystem
+    )
     if (kind === 'keep') {
       addFinalPath(relPath)
       continue
@@ -305,6 +315,7 @@ export async function expandQuickOpenGitFileListing(opts: {
       includeSymlinks
     })),
     budget,
+    opts.filesystem,
     opts.signal,
     opts.maxResults === undefined ? undefined : Math.max(0, opts.maxResults - files.size),
     files

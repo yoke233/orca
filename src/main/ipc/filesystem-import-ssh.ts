@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises'
 import { basename, posix, resolve } from 'node:path'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { authorizeExternalPath } from './filesystem-auth'
 import { isENOENT } from './filesystem-path-containment'
 import { getSshConnectionManager } from './ssh'
@@ -110,9 +110,9 @@ async function importOneSourceSsh(
     }
   }
 
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }

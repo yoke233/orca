@@ -10,7 +10,6 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
-import { readdir, stat } from 'node:fs/promises'
 import type { DirEntry, FsChangeEvent } from '../../shared/filesystem-entry-types'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
@@ -28,6 +27,7 @@ import {
   watchFileExplorerInWatcherProcess
 } from './file-watcher-host'
 import { registerRuntimeFileWatcherRelease } from './runtime-file-watcher-leases'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithAssertRemoteTerminalFileGrantPathStillCanonical extends RuntimeFileCommandsWithWriteTerminalArtifactFile {
   protected async assertRemoteTerminalFileGrantPathStillCanonical(
@@ -67,7 +67,7 @@ export class RuntimeFileCommandsWithAssertRemoteTerminalFileGrantPathStillCanoni
     }
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const entries = await readdir(dirPath, { withFileTypes: true })
+    const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     const mapped = entries.map((entry) => ({
       name: entry.name,
       isDirectory: isRuntimeDirectoryEntry(entry),
@@ -109,7 +109,7 @@ export class RuntimeFileCommandsWithAssertRemoteTerminalFileGrantPathStillCanoni
         }
 
         const rootPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-        const rootStats = await stat(rootPath)
+        const rootStats = await workspaceFsPromises.stat(rootPath)
         if (!rootStats.isDirectory()) {
           throw new Error('not_a_directory')
         }

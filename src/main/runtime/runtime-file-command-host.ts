@@ -13,8 +13,8 @@ import {
   WINDOWS_RUNTIME_FILE_WATCH_CLOSE_DEADLINE_MS,
   WINDOWS_RUNTIME_FILE_WATCH_DEBOUNCE_MS
 } from './runtime-file-commands-mobile-file-list-limit'
-import { watch as watchFs } from 'node:fs'
 import { WatcherProcessFailure } from '../ipc/parcel-watcher-process-failure'
+import { workspaceFs } from '../workspace-filesystem'
 import { basenameFromRelativePath } from './runtime-file-paths'
 
 export type RuntimeFileCommandHost = {
@@ -89,7 +89,7 @@ export function watchWindowsRuntimeFileExplorer(
   }
 
   // Why: Parcel's Watchman probe can crash the headless server on Windows; use a conservative overflow refresh instead.
-  const watcher = watchFs(rootPath, { recursive: true }, scheduleOverflow)
+  const watcher = workspaceFs.watch(rootPath, { recursive: true }, scheduleOverflow)
   const onClose = (): void => {
     watcher.removeListener('error', onError)
     physicalClose.markExited()

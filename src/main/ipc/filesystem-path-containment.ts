@@ -1,5 +1,5 @@
 import { resolve, relative, isAbsolute, sep } from 'node:path'
-import { realpath } from 'node:fs/promises'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 /**
  * Check whether resolvedTarget is equal to or a descendant of resolvedBase.
@@ -45,7 +45,7 @@ export function isENOENT(error: unknown): boolean {
 
 export async function normalizeExistingPath(resolvedPath: string): Promise<string> {
   try {
-    return resolve(await realpath(resolvedPath))
+    return resolve(await workspaceFsPromises.realpath(resolvedPath))
   } catch (error) {
     if (isENOENT(error)) {
       return resolvedPath

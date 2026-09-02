@@ -20,7 +20,12 @@ const EXTERNAL_MAIN_DEPENDENCIES = Object.keys(packageJson.dependencies).filter(
 )
 
 function isExternalMainModule(source: string): boolean {
-  if (isBuiltin(source) || source === 'electron' || source.startsWith('electron/')) {
+  if (
+    isBuiltin(source) ||
+    source === 'electron' ||
+    source.startsWith('electron/') ||
+    source === 'original-fs'
+  ) {
     return true
   }
   return EXTERNAL_MAIN_DEPENDENCIES.some(

@@ -1,6 +1,8 @@
-import { lstat, realpath } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, dirname } from 'node:path'
+
+export type RenameCollisionFilesystem = Pick<typeof nodeFsPromises, 'lstat' | 'realpath'>
 
 function isENOENT(error: unknown): boolean {
   return (
@@ -22,7 +24,8 @@ async function isSameDirectoryEntryRename(
   oldPath: string,
   newPath: string,
   oldStat: Stats,
-  newStat: Stats
+  newStat: Stats,
+  filesystem: RenameCollisionFilesystem
 ): Promise<boolean> {
   const oldBasename = basename(oldPath)
   const newBasename = basename(newPath)
@@ -33,7 +36,10 @@ async function isSameDirectoryEntryRename(
     return true
   }
   try {
-    const [oldRealPath, newRealPath] = await Promise.all([realpath(oldPath), realpath(newPath)])
+    const [oldRealPath, newRealPath] = await Promise.all([
+      filesystem.realpath(oldPath),
+      filesystem.realpath(newPath)
+    ])
     return oldRealPath === newRealPath
   } catch (error) {
     // Preserve case-only renames for dangling symlinks, which realpath cannot resolve.
@@ -49,11 +55,12 @@ async function isSameDirectoryEntryRename(
 
 export async function assertNoClobberRenameDestinationAvailable(
   oldPath: string,
-  newPath: string
+  newPath: string,
+  filesystem: RenameCollisionFilesystem = nodeFsPromises
 ): Promise<void> {
   let newStat: Stats
   try {
-    newStat = await lstat(newPath)
+    newStat = await filesystem.lstat(newPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -61,8 +68,8 @@ export async function assertNoClobberRenameDestinationAvailable(
     throw error
   }
 
-  const oldStat = await lstat(oldPath)
-  if (await isSameDirectoryEntryRename(oldPath, newPath, oldStat, newStat)) {
+  const oldStat = await filesystem.lstat(oldPath)
+  if (await isSameDirectoryEntryRename(oldPath, newPath, oldStat, newStat, filesystem)) {
     return
   }
 

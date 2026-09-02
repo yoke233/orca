@@ -6,9 +6,10 @@ import {
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
-import { constants, copyFile, mkdir, rm } from 'node:fs/promises'
+import { constants } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { renameLocalPathSerializedByDestination } from '../destination-serialized-local-rename'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends RuntimeFileCommandsWithWriteFileExplorerFile {
   async createFileExplorerDirNoClobber(
@@ -35,7 +36,7 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
     }
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirPath, { recursive: false })
+    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
     return { ok: true }
   }
 
@@ -72,9 +73,9 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
     const store = this.host.requireStore()
     const tempPath = await resolveAuthorizedPath(tempTarget.path, store)
     const finalPath = await resolveAuthorizedPath(finalTarget.path, store)
-    await mkdir(dirname(finalPath), { recursive: true })
-    await copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
-    await rm(tempPath, { force: true })
+    await workspaceFsPromises.mkdir(dirname(finalPath), { recursive: true })
+    await workspaceFsPromises.copyFile(tempPath, finalPath, constants.COPYFILE_EXCL)
+    await workspaceFsPromises.rm(tempPath, { force: true })
     return { ok: true }
   }
 
@@ -150,9 +151,9 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
     const destinationPath = await resolveAuthorizedPath(destinationTarget.path, store, {
       preserveSymlink: true
     })
-    await mkdir(dirname(destinationPath), { recursive: true })
+    await workspaceFsPromises.mkdir(dirname(destinationPath), { recursive: true })
     // Why: COPYFILE_EXCL preserves the no-clobber invariant of the local shell copy IPC (caller already deconflicts names).
-    await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+    await workspaceFsPromises.copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
     return { ok: true }
   }
 
@@ -184,7 +185,7 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       preserveSymlink: true
     })
     // Why: a non-local runtime has no client Trash; this delete is permanent, so the renderer confirms before calling.
-    await rm(targetPath, { recursive: recursive === true, force: true })
+    await workspaceFsPromises.rm(targetPath, { recursive: recursive === true, force: true })
     return { ok: true }
   }
 }

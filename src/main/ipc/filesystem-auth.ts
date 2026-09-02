@@ -1,7 +1,6 @@
 import { resolve, dirname, basename } from 'node:path'
-import { realpathSync } from 'node:fs'
-import { realpath } from 'node:fs/promises'
 import type { Store } from '../persistence'
+import { workspaceFs, workspaceFsPromises } from '../workspace-filesystem'
 import { getAllowedRoots } from './filesystem-allowed-roots'
 import { isDescendantOrEqual, isENOENT, normalizeExistingPath } from './filesystem-path-containment'
 import {
@@ -39,7 +38,7 @@ export function authorizeExternalPath(targetPath: string): void {
   rememberAuthorizedExternalPath(resolvedTarget)
   try {
     // Why: macOS canonicalizes /tmp to /private/tmp during read authorization.
-    rememberAuthorizedExternalPath(realpathSync(resolvedTarget))
+    rememberAuthorizedExternalPath(workspaceFs.realpathSync(resolvedTarget))
   } catch {}
 }
 
@@ -77,7 +76,7 @@ export async function resolveAuthorizedPath(
     // Canonicalize the parent so ancestor symlinks can't redirect outside allowed roots, but keep the leaf so delete/rename act on the link itself.
     let realParent: string
     try {
-      realParent = await realpath(dirname(resolvedTarget))
+      realParent = await workspaceFsPromises.realpath(dirname(resolvedTarget))
     } catch (error) {
       if (isENOENT(error)) {
         return resolveAuthorizedMissingPath(resolvedTarget, store)
@@ -97,7 +96,7 @@ export async function resolveAuthorizedPath(
 
   try {
     // Why: Windows/WSL realpath can return UNC-shaped paths; re-resolve to compare against this module's allow-list roots.
-    const realTarget = resolve(await realpath(resolvedTarget))
+    const realTarget = resolve(await workspaceFsPromises.realpath(resolvedTarget))
     if (
       !(await isPathAllowedIncludingRegisteredWorktrees(realTarget, store, {
         canonicalSourcePath: resolvedTarget
@@ -120,7 +119,7 @@ async function resolveAuthorizedMissingPath(resolvedTarget: string, store: Store
 
   while (true) {
     try {
-      const realAncestor = await realpath(existingAncestor)
+      const realAncestor = await workspaceFsPromises.realpath(existingAncestor)
       const candidateTarget = resolve(realAncestor, ...missingSegments)
       if (
         !(await isPathAllowedIncludingRegisteredWorktrees(candidateTarget, store, {

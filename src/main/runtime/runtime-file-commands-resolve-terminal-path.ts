@@ -12,7 +12,6 @@ import {
   provenancePathCandidate,
   resolveTerminalAbsolutePath
 } from './runtime-file-commands-terminal-file-paths'
-import { stat } from 'node:fs/promises'
 import { getRuntimeFileTargetExecutionHostId } from './runtime-file-watcher-leases'
 import { isSafeMobileRelativePath } from './runtime-file-command-host'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
@@ -22,6 +21,7 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithResolveTerminalPath extends RuntimeFileCommandsWithReadMobileFile {
   // Resolves a mobile terminal tap to a worktree-relative path; relatives resolve against cwd, else the worktree root.
@@ -90,7 +90,7 @@ export class RuntimeFileCommandsWithResolveTerminalPath extends RuntimeFileComma
       ) {
         const stats = ownedConnectionId
           ? await this.statRemoteTerminalPath(absolutePath, ownedConnectionId)
-          : await stat(await resolveAuthorizedPath(absolutePath, store))
+          : await workspaceFsPromises.stat(await resolveAuthorizedPath(absolutePath, store))
         return {
           worktree: ownedWorktree.id,
           relativePath: ownedRelativePath,

@@ -1,6 +1,6 @@
-import { readdir } from 'node:fs/promises'
 import { basename as pathBasename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { MarkdownDocument } from '../../shared/filesystem-entry-types'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 function normalizeRelativePath(path: string): string {
   return path.replace(/[\\/]+/g, '/').replace(/^\/+/, '')
@@ -92,7 +92,7 @@ export async function listMarkdownDocuments(rootPath: string): Promise<MarkdownD
   const documents: MarkdownDocument[] = []
 
   async function visitDirectory(dirPath: string): Promise<void> {
-    const entries = await readdir(dirPath, { withFileTypes: true })
+    const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
     for (const entry of entries) {
       if (entry.isSymbolicLink()) {
         continue

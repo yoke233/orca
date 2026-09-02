@@ -13,8 +13,8 @@ import {
   listMarkdownDocuments,
   markdownDocumentsFromRelativePaths
 } from '../ipc/markdown-documents'
-import { stat } from 'node:fs/promises'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithSearchRuntimeFiles extends RuntimeFileCommandsWithCreateFileExplorerDirNoClobber {
   async searchRuntimeFiles(
@@ -102,7 +102,7 @@ export class RuntimeFileCommandsWithSearchRuntimeFiles extends RuntimeFileComman
       }
     }
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const stats = await stat(filePath)
+    const stats = await workspaceFsPromises.stat(filePath)
     return { size: stats.size, isDirectory: stats.isDirectory(), mtime: stats.mtimeMs }
   }
 }

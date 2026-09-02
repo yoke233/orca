@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { constants } from 'node:fs'
-import { copyFile, mkdir, writeFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import type { Store } from '../persistence'
 import { resolveAuthorizedPath } from './filesystem-auth'
@@ -10,6 +9,7 @@ import { importExternalPathsSsh } from './filesystem-import-ssh'
 import type { SshMutationExpectation } from '../../shared/ssh-types'
 import { assertSshMutationExpectation } from '../ssh/ssh-connection-generation'
 import { renameLocalPathSerializedByDestination } from '../destination-serialized-local-rename'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { assertNotExists, rethrowWithUserMessage } from './filesystem-create-path-guards'
 import type {
   ImportItemResult,
@@ -17,6 +17,7 @@ import type {
   ResolveDroppedPathsResult,
   StagedExternalImportSource
 } from './filesystem-import-result-types'
+
 import { importOneSource } from './filesystem-import-local'
 import { stageOneSourceForRuntimeUpload } from './filesystem-runtime-upload-staging'
 
@@ -42,10 +43,10 @@ export function registerFilesystemMutationHandlers(store: Store): void {
         return provider.createFile(args.filePath)
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
-      await mkdir(dirname(filePath), { recursive: true })
+      await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
       try {
         // Use the 'wx' flag for atomic create-if-not-exists, avoiding TOCTOU races
-        await writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
+        await workspaceFsPromises.writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
       } catch (error) {
         rethrowWithUserMessage(error, filePath)
       }
@@ -70,7 +71,7 @@ export function registerFilesystemMutationHandlers(store: Store): void {
       }
       const dirPath = await resolveAuthorizedPath(args.dirPath, store)
       await assertNotExists(dirPath)
-      await mkdir(dirPath, { recursive: true })
+      await workspaceFsPromises.mkdir(dirPath, { recursive: true })
     }
   )
 
@@ -131,10 +132,10 @@ export function registerFilesystemMutationHandlers(store: Store): void {
       const destinationPath = await resolveAuthorizedPath(args.destinationPath, store, {
         preserveSymlink: true
       })
-      await mkdir(dirname(destinationPath), { recursive: true })
+      await workspaceFsPromises.mkdir(dirname(destinationPath), { recursive: true })
       // Why: duplicate/copy callers deconflict before copying. COPYFILE_EXCL
       // keeps a late race from silently overwriting an existing file.
-      await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+      await workspaceFsPromises.copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
     }
   )
 

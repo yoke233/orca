@@ -20,6 +20,8 @@ export type BoundedNodeFileRead = {
   stats: Stats
 }
 
+export type OpenNodeFile = typeof open
+
 function validateSize(size: number, maxBytes: number): void {
   if (!Number.isSafeInteger(size) || size < 0) {
     throw new Error('File has an invalid byte size')
@@ -31,9 +33,10 @@ function validateSize(size: number, maxBytes: number): void {
 
 export async function readNodeFileWithinLimit(
   filePath: string,
-  maxBytes: number
+  maxBytes: number,
+  openFile: OpenNodeFile = open
 ): Promise<BoundedNodeFileRead> {
-  const handle = await open(filePath, 'r')
+  const handle = await openFile(filePath, 'r')
   try {
     return await readNodeFileHandleWithinLimit(handle, maxBytes)
   } finally {

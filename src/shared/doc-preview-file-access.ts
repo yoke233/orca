@@ -1,5 +1,6 @@
 import { constants, type Stats } from 'node:fs'
-import { open, realpath, stat, type FileHandle } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { extname } from 'node:path'
 import { isBinaryBuffer } from './binary-buffer'
 import { isPathInsideOrEqual } from './cross-platform-path'
@@ -39,6 +40,8 @@ const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOF
 // threadpool slot for good; non-blocking open returns at once and does not change regular-file reads.
 const OPEN_NONBLOCK = typeof constants.O_NONBLOCK === 'number' ? constants.O_NONBLOCK : 0
 
+export type DocPreviewFilesystem = Pick<typeof nodeFsPromises, 'open' | 'realpath' | 'stat'>
+
 function authorizationError(): Error {
   return new Error(DOC_PREVIEW_PATH_AUTHORIZATION_ERROR)
 }
@@ -55,17 +58,20 @@ function sameFileIdentity(opened: Stats, current: Stats): boolean {
 }
 
 async function openAuthorizedDocPreviewTarget(
-  request: DocPreviewFileAccessRequest
+  request: DocPreviewFileAccessRequest,
+  filesystem: DocPreviewFilesystem
 ): Promise<{ handle: FileHandle; canonicalTarget: string }> {
   const [canonicalBoundary, canonicalEntry, canonicalTarget, canonicalImplicitRoot] =
     await Promise.all([
-      realpath(request.boundaryPath),
-      realpath(request.entryPath),
-      realpath(request.targetPath),
-      request.implicitRootPath === null ? Promise.resolve(null) : realpath(request.implicitRootPath)
+      filesystem.realpath(request.boundaryPath),
+      filesystem.realpath(request.entryPath),
+      filesystem.realpath(request.targetPath),
+      request.implicitRootPath === null
+        ? Promise.resolve(null)
+        : filesystem.realpath(request.implicitRootPath)
     ])
   const canonicalAuthorizedRoots = await Promise.all(
-    request.authorizedRootPaths.map((root) => realpath(root))
+    request.authorizedRootPaths.map((root) => filesystem.realpath(root))
   )
 
   const entryAuthorized =
@@ -86,12 +92,15 @@ async function openAuthorizedDocPreviewTarget(
     throw authorizationError()
   }
 
-  const handle = await open(canonicalTarget, constants.O_RDONLY | OPEN_NOFOLLOW | OPEN_NONBLOCK)
+  const handle = await filesystem.open(
+    canonicalTarget,
+    constants.O_RDONLY | OPEN_NOFOLLOW | OPEN_NONBLOCK
+  )
   try {
     const [openedStats, currentCanonicalTarget, currentTargetStats] = await Promise.all([
       handle.stat(),
-      realpath(canonicalTarget),
-      stat(canonicalTarget)
+      filesystem.realpath(canonicalTarget),
+      filesystem.stat(canonicalTarget)
     ])
     if (
       !openedStats.isFile() ||
@@ -109,9 +118,10 @@ async function openAuthorizedDocPreviewTarget(
 
 /** Canonicalizes, authorizes, opens, and reads on the filesystem's execution host. */
 export async function readAuthorizedDocPreviewFile(
-  request: DocPreviewFileAccessRequest
+  request: DocPreviewFileAccessRequest,
+  filesystem: DocPreviewFilesystem = nodeFsPromises
 ): Promise<DocPreviewFileAccessResult> {
-  const { handle, canonicalTarget } = await openAuthorizedDocPreviewTarget(request)
+  const { handle, canonicalTarget } = await openAuthorizedDocPreviewTarget(request, filesystem)
   try {
     const mimeType = DOC_PREVIEW_BINARY_MIME_TYPES[extname(canonicalTarget).toLowerCase()]
     const { buffer } = await readNodeFileHandleWithinLimit(

@@ -1,4 +1,4 @@
-import { lstat } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
 import * as path from 'node:path'
 import { isBinaryBuffer } from './binary-buffer'
 import { decodeGitCQuotedPath } from './git-cquoted-path'
@@ -22,6 +22,8 @@ export const MAX_UNTRACKED_LINE_COUNT_BYTES = 2 * 1024 * 1024
 // different worktree; entries are ~200 bytes, so worst case is a few MB.
 const UNTRACKED_STATS_CACHE_MAX_ENTRIES = 2 * DEFAULT_GIT_STATUS_LIMIT
 const NEWLINE_BYTE = 0x0a
+
+export type GitUntrackedFilesystem = Pick<typeof nodeFsPromises, 'lstat'>
 
 type CachedUntrackedStats = {
   size: number
@@ -106,9 +108,13 @@ function parseNulDelimitedNumstat(stdout: string): Map<string, GitLineStats> {
   return stats
 }
 
-async function countFileAdditions(absolutePath: string): Promise<GitLineStats> {
+async function countFileAdditions(
+  absolutePath: string,
+  filesystem: GitUntrackedFilesystem,
+  openFile?: typeof nodeFsPromises.open
+): Promise<GitLineStats> {
   try {
-    const fileStat = await lstat(absolutePath)
+    const fileStat = await filesystem.lstat(absolutePath)
     const cached = untrackedStatsCache.get(absolutePath)
     if (
       cached &&
@@ -129,7 +135,9 @@ async function countFileAdditions(absolutePath: string): Promise<GitLineStats> {
     if (!fileStat.isFile() || fileStat.size > MAX_UNTRACKED_LINE_COUNT_BYTES) {
       return rememberUntrackedStats(absolutePath, fileStat, {})
     }
-    const { buffer } = await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES)
+    const { buffer } = openFile
+      ? await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES, openFile)
+      : await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES)
     if (isBinaryBuffer(buffer)) {
       return rememberUntrackedStats(absolutePath, fileStat, {})
     }
@@ -187,7 +195,9 @@ function createGitLineStatsAbortError(): Error {
 export async function collectUntrackedAdditions(
   worktreePath: string,
   untrackedPaths: readonly string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  filesystem: GitUntrackedFilesystem = nodeFsPromises,
+  openFile?: typeof nodeFsPromises.open
 ): Promise<Map<string, GitLineStats>> {
   const result = new Map<string, GitLineStats>()
   for (let i = 0; i < untrackedPaths.length; i += UNTRACKED_READ_CONCURRENCY) {
@@ -200,7 +210,10 @@ export async function collectUntrackedAdditions(
     const chunk = untrackedPaths.slice(i, i + UNTRACKED_READ_CONCURRENCY)
     await Promise.all(
       chunk.map(async (relativePath) => {
-        result.set(relativePath, await countFileAdditions(path.join(worktreePath, relativePath)))
+        result.set(
+          relativePath,
+          await countFileAdditions(path.join(worktreePath, relativePath), filesystem, openFile)
+        )
       })
     )
   }

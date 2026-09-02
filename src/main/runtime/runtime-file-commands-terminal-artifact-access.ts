@@ -1,8 +1,8 @@
 // @ts-nocheck -- mechanically split declarations.
 import { tmpdir } from 'node:os'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
-import { realpath } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import type {
   RuntimeFileStatLike,
   TerminalFileGrant
@@ -27,7 +27,7 @@ export async function localTerminalArtifactRoots(worktreePath: string): Promise<
 
 export async function canonicalPathForArtifactComparison(path: string): Promise<string> {
   try {
-    return await realpath(path)
+    return await workspaceFsPromises.realpath(path)
   } catch {
     return path
   }

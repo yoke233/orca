@@ -10,6 +10,7 @@ import type { GitRuntimeOptions } from '../git-runtime-options'
 import { gitReadOptionsForWorktree } from '../git-runtime-options'
 import { gitExecFileAsync, gitOptionalLocksDisabledEnv } from '../runner'
 import { resolveWorktreeFilesystemPath } from './worktree-filesystem-path'
+import { workspaceFsPromises } from '../../workspace-filesystem'
 
 async function runNumstat(
   worktreePath: string,
@@ -61,7 +62,9 @@ export async function attachLineStats(
     collectUntrackedAdditions(
       resolveWorktreeFilesystemPath(worktreePath, options),
       untrackedPaths,
-      options.signal
+      options.signal,
+      workspaceFsPromises,
+      workspaceFsPromises.open
     )
   ])
   for (const entry of entries) {

@@ -13,11 +13,12 @@ import {
   terminalFileStatIdentity
 } from './runtime-file-commands-terminal-artifact-access'
 import { openLocalTerminalArtifactGrant } from './runtime-file-commands-terminal-file-paths'
-import { chmod, constants, rename, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { FileStat, IFilesystemProvider } from '../providers/types'
 import type { RuntimeFilePreviewResult } from '../../shared/runtime-types'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithWriteTerminalArtifactFile extends RuntimeFileCommandsWithRevokeTerminalFileGrantsForClient {
   async writeTerminalArtifactFile(
@@ -88,9 +89,9 @@ export class RuntimeFileCommandsWithWriteTerminalArtifactFile extends RuntimeFil
       `.${basename(grant.absolutePath)}.${randomUUID()}.tmp`
     )
     try {
-      await writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' })
+      await workspaceFsPromises.writeFile(tempPath, content, { encoding: 'utf-8', flag: 'wx' })
       if (typeof originalMode === 'number') {
-        await chmod(tempPath, originalMode & 0o7777)
+        await workspaceFsPromises.chmod(tempPath, originalMode & 0o7777)
       }
       const freshHandle = await openLocalTerminalArtifactGrant(grant, constants.O_RDONLY)
       try {
@@ -98,14 +99,14 @@ export class RuntimeFileCommandsWithWriteTerminalArtifactFile extends RuntimeFil
       } finally {
         await freshHandle.close()
       }
-      await rename(tempPath, grant.absolutePath)
+      await workspaceFsPromises.rename(tempPath, grant.absolutePath)
       grant.statIdentity = terminalFileStatIdentity(
         await this.statLocalTerminalPath(grant.absolutePath)
       )
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
     } finally {
-      await rm(tempPath, { force: true }).catch(() => {})
+      await workspaceFsPromises.rm(tempPath, { force: true }).catch(() => {})
     }
   }
 

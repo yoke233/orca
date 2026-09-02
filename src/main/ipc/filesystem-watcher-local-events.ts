@@ -1,4 +1,3 @@
-import { stat } from 'node:fs/promises'
 import type { Event as WatcherEvent } from '@parcel/watcher'
 import type { FsChangeEvent, FsChangedPayload } from '../../shared/filesystem-entry-types'
 import {
@@ -17,6 +16,7 @@ import {
   trackDetachedLocalUnsubscribe
 } from './filesystem-watcher-listener-lifecycle'
 import { createDebouncedBatch } from './filesystem-watcher-batch-control'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 // ── Event coalescing ─────────────────────────────────────────────────
 // Why: keep the last event per path in a flush window; delete→create emits both (delete cleans the subtree, create refreshes the parent), create→delete is dropped (§4.4).
@@ -71,7 +71,7 @@ function coalesceEvents(
 
 async function tryStatIsDirectory(filePath: string): Promise<boolean | undefined> {
   try {
-    const s = await stat(filePath)
+    const s = await workspaceFsPromises.stat(filePath)
     return s.isDirectory()
   } catch {
     // Why: stat failure (EPERM, vanished file) → undefined; renderer treats it as a file event, the safe default (§4.4).

@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { isENOENT } from './filesystem-path-containment'
 
 /**
@@ -31,7 +31,7 @@ export function rethrowWithUserMessage(error: unknown, targetPath: string): neve
  */
 export async function assertNotExists(targetPath: string): Promise<void> {
   try {
-    await lstat(targetPath)
+    await workspaceFsPromises.lstat(targetPath)
     throw new Error(
       `A file or folder named '${basename(targetPath)}' already exists in this location`
     )

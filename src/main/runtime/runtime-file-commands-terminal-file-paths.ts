@@ -1,5 +1,4 @@
 // @ts-nocheck -- mechanically split declarations.
-import { lstat, open, stat } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import type { Store } from '../persistence'
@@ -28,10 +27,11 @@ import {
   resolveRuntimePath
 } from '../../shared/cross-platform-path'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export async function assertRuntimePathDoesNotExist(targetPath: string): Promise<void> {
   try {
-    await lstat(targetPath)
+    await workspaceFsPromises.lstat(targetPath)
     throw new Error(
       `A file or folder named '${basename(targetPath)}' already exists in this location`
     )
@@ -58,10 +58,10 @@ export function rethrowRuntimeFileCreateError(error: unknown, targetPath: string
 
 export async function readLocalMobileFile(filePath: string, store: Store): Promise<string> {
   const authorizedPath = await resolveAuthorizedPath(filePath, store)
-  const fileStat = await stat(authorizedPath)
+  const fileStat = await workspaceFsPromises.stat(authorizedPath)
   // Why: cap the read so opening a large file can't block the WebSocket (previews are read-only convenience views).
   const readLimit = Math.min(fileStat.size, MOBILE_FILE_READ_MAX_BYTES + 1)
-  const handle = await open(authorizedPath, 'r')
+  const handle = await workspaceFsPromises.open(authorizedPath, 'r')
   try {
     const buffer = Buffer.alloc(readLimit)
     const { bytesRead } = await handle.read(buffer, 0, readLimit, 0)
@@ -140,7 +140,7 @@ export async function openLocalTerminalArtifactGrant(
 ): Promise<FileHandle> {
   await assertLocalTerminalArtifactPathStillCanonical(grant.absolutePath)
   try {
-    return await open(grant.absolutePath, flags | OPEN_NOFOLLOW)
+    return await workspaceFsPromises.open(grant.absolutePath, flags | OPEN_NOFOLLOW)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
       throw new Error('terminal_file_grant_stale')

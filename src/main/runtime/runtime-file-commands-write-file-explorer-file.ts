@@ -5,7 +5,6 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
-import { lstat, mkdir, writeFile } from 'node:fs/promises'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import { isENOENT } from '../ipc/filesystem-path-containment'
 import { dirname } from 'node:path'
@@ -13,6 +12,7 @@ import {
   assertRuntimePathDoesNotExist,
   rethrowRuntimeFileCreateError
 } from './runtime-file-commands-terminal-file-paths'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCommandsWithReadFileExplorerPreview {
   async writeFileExplorerFile(
@@ -41,7 +41,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     try {
-      const fileStats = await lstat(filePath)
+      const fileStats = await workspaceFsPromises.lstat(filePath)
       if (fileStats.isDirectory()) {
         throw new Error('Cannot write to a directory')
       }
@@ -50,7 +50,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
         throw error
       }
     }
-    await writeFile(filePath, content, 'utf-8')
+    await workspaceFsPromises.writeFile(filePath, content, 'utf-8')
     return { ok: true }
   }
 
@@ -80,8 +80,8 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, content, { flag: 'wx' })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.writeFile(filePath, content, { flag: 'wx' })
     return { ok: true }
   }
 
@@ -112,8 +112,8 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
-    await writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
     return { ok: true }
   }
 
@@ -141,9 +141,9 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await mkdir(dirname(filePath), { recursive: true })
+    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
     try {
-      await writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
+      await workspaceFsPromises.writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
     } catch (error) {
       rethrowRuntimeFileCreateError(error, filePath)
     }
@@ -175,7 +175,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     await assertRuntimePathDoesNotExist(dirPath)
-    await mkdir(dirPath, { recursive: false })
+    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
     return { ok: true }
   }
 }

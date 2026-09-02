@@ -1,7 +1,8 @@
-import { lstat, opendir } from 'node:fs/promises'
+import * as nodeFsPromises from 'node:fs/promises'
 import { compareFileNames } from './file-name-sort'
 import { isFileListingCancellation, throwIfFileListingCancelled } from './file-listing-cancellation'
 import { isQuickOpenReadableDirectory } from './quick-open-directory-validation'
+import type { QuickOpenFilesystem } from './quick-open-filesystem'
 import {
   assertQuickOpenReaddirDeadline,
   consumeQuickOpenReaddirEntryBudget,
@@ -19,16 +20,18 @@ export async function readQuickOpenDirectoryEntries(opts: {
   absPath: string
   allowSymlinkedRoot: boolean
   budget: QuickOpenReaddirBudget
+  filesystem?: QuickOpenFilesystem
   signal?: AbortSignal
 }): Promise<QuickOpenDirectoryEntry[]> {
+  const filesystem = opts.filesystem ?? nodeFsPromises
   try {
-    const stat = await lstat(opts.absPath)
+    const stat = await filesystem.lstat(opts.absPath)
     if (!isQuickOpenReadableDirectory(stat, opts.allowSymlinkedRoot)) {
       return []
     }
 
     const entries: QuickOpenDirectoryEntry[] = []
-    const directory = await opendir(opts.absPath)
+    const directory = await filesystem.opendir(opts.absPath)
     try {
       throwIfFileListingCancelled(opts.signal)
       assertQuickOpenReaddirDeadline(opts.budget)
@@ -57,7 +60,7 @@ export async function readQuickOpenDirectoryEntries(opts: {
 
     // Why: discard buffered names if the path became a symlink while its
     // directory handle was open; descendants must never escape the root.
-    const statAfterRead = await lstat(opts.absPath)
+    const statAfterRead = await filesystem.lstat(opts.absPath)
     return isQuickOpenReadableDirectory(statAfterRead, opts.allowSymlinkedRoot) ? entries : []
   } catch (error) {
     if (isQuickOpenReaddirBudgetError(error) || isFileListingCancellation(error)) {

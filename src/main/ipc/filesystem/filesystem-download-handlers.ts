@@ -1,9 +1,9 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { open, writeFile } from 'node:fs/promises'
 import { getRuntimePathBasename } from '../../../shared/cross-platform-path'
 import { requireSshFilesystemProvider } from '../../providers/ssh-filesystem-dispatch'
 import { sanitizeLocalDownloadFilename } from '../../local-download-filename'
+import { workspaceFsPromises } from '../../workspace-filesystem'
 import { registerFilesystemDownloadFolderHandlers } from '../filesystem-download-folder'
 import type { FilesystemHandlerContext } from './filesystem-handler-context'
 import {
@@ -99,7 +99,10 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
       const tempPath = createSiblingTransferPath(destinationPath, 'download')
       let promoted = false
       try {
-        await writeFile(tempPath, decodeDownloadedFileContent(content, encoding))
+        await workspaceFsPromises.writeFile(
+          tempPath,
+          decodeDownloadedFileContent(content, encoding)
+        )
         await promoteDownloadedFile(tempPath, destinationPath, existed)
         promoted = true
         return { canceled: false, destinationPath }
@@ -135,7 +138,7 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
       const tempPath = createSiblingTransferPath(destinationPath, 'download')
       const transferId = randomUUID()
       try {
-        const handle = await open(tempPath, 'wx')
+        const handle = await workspaceFsPromises.open(tempPath, 'wx')
         const senderId = typeof event.sender.id === 'number' ? event.sender.id : Number.NaN
         const cleanupTimer = setTimeout(() => {
           void closeDownloadSession(transferId, true)

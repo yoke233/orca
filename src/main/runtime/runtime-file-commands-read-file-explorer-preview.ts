@@ -16,7 +16,6 @@ import {
   SSH_FILESYSTEM_PROVIDER_UNAVAILABLE_MESSAGE,
   getSshFilesystemProvider
 } from '../providers/ssh-filesystem-dispatch'
-import { open, stat } from 'node:fs/promises'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import { extname } from 'node:path'
 import {
@@ -30,6 +29,7 @@ import type {
 } from '../../shared/doc-preview-file-access'
 import { readAuthorizedDocPreviewFile } from '../../shared/doc-preview-file-access'
 import { readSshFileExplorerChunk } from './ssh-file-explorer-chunk-read'
+import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithReadFileExplorerPreview extends RuntimeFileCommandsWithAssertRemoteTerminalFileGrantPathStillCanonical {
   async readFileExplorerPreview(
@@ -78,7 +78,7 @@ export class RuntimeFileCommandsWithReadFileExplorerPreview extends RuntimeFileC
     const maxBytes = mimeType ? binaryMaxBytes : MOBILE_FILE_READ_MAX_BYTES
     let buffer: Buffer
     try {
-      buffer = (await readNodeFileWithinLimit(filePath, maxBytes)).buffer
+      buffer = (await readNodeFileWithinLimit(filePath, maxBytes, workspaceFsPromises.open)).buffer
     } catch (error) {
       if (error instanceof NodeFileReadTooLargeError) {
         throw new Error('file_too_large')
@@ -149,7 +149,7 @@ export class RuntimeFileCommandsWithReadFileExplorerPreview extends RuntimeFileC
     }
     const result = provider?.readDocPreviewFile
       ? await provider.readDocPreviewFile(request)
-      : await readAuthorizedDocPreviewFile(request)
+      : await readAuthorizedDocPreviewFile(request, workspaceFsPromises)
     return assertPreviewWithinTransportBudget(result, maxContentBytes)
   }
 
@@ -173,11 +173,11 @@ export class RuntimeFileCommandsWithReadFileExplorerPreview extends RuntimeFileC
     }
 
     const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    const fileStats = await stat(filePath)
+    const fileStats = await workspaceFsPromises.stat(filePath)
     if (fileStats.isDirectory()) {
       throw new Error('Cannot download a directory')
     }
-    const handle = await open(filePath, 'r')
+    const handle = await workspaceFsPromises.open(filePath, 'r')
     try {
       const buffer = Buffer.alloc(Math.min(length, Math.max(0, fileStats.size - offset)))
       const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, offset)

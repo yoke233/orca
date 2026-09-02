@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { workspaceFsPromises } from '../../workspace-filesystem'
 import { isENOENT } from '../filesystem-path-containment'
 
 export function decodeDownloadedFileContent(content: string, encoding: 'utf8' | 'base64'): Buffer {
@@ -16,14 +16,14 @@ export async function cleanupLocalTransferPath(filePath: string | null): Promise
   if (!filePath) {
     return
   }
-  await rm(filePath, { force: true }).catch(() => {})
+  await workspaceFsPromises.rm(filePath, { force: true }).catch(() => {})
 }
 
 export async function inspectDownloadDestination(
   destinationPath: string
 ): Promise<{ existed: boolean }> {
   try {
-    const destinationStat = await stat(destinationPath)
+    const destinationStat = await workspaceFsPromises.stat(destinationPath)
     if (destinationStat.isDirectory()) {
       throw new Error('Cannot download to a directory')
     }
@@ -38,7 +38,7 @@ export async function inspectDownloadDestination(
 
 export async function assertDestinationStillUnclaimed(destinationPath: string): Promise<void> {
   try {
-    await stat(destinationPath)
+    await workspaceFsPromises.stat(destinationPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -55,20 +55,20 @@ export async function promoteDownloadedFile(
 ): Promise<void> {
   if (!destinationExisted) {
     await assertDestinationStillUnclaimed(destinationPath)
-    await rename(tempPath, destinationPath)
+    await workspaceFsPromises.rename(tempPath, destinationPath)
     return
   }
 
   const backupPath = createSiblingTransferPath(destinationPath, 'backup')
   let backupCreated = false
   try {
-    await rename(destinationPath, backupPath)
+    await workspaceFsPromises.rename(destinationPath, backupPath)
     backupCreated = true
-    await rename(tempPath, destinationPath)
+    await workspaceFsPromises.rename(tempPath, destinationPath)
     await cleanupLocalTransferPath(backupPath)
   } catch (error) {
     if (backupCreated) {
-      await rename(backupPath, destinationPath).catch(() => {})
+      await workspaceFsPromises.rename(backupPath, destinationPath).catch(() => {})
     }
     throw error
   }

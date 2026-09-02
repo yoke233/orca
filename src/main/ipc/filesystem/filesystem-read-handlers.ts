@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { readdir, readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
 import type { DirEntry, MarkdownDocument } from '../../../shared/filesystem-entry-types'
 import { sortDirEntries } from '../../../shared/file-name-sort'
@@ -9,6 +8,7 @@ import { resolveAuthorizedPath } from '../filesystem-auth'
 import { isENOENT } from '../filesystem-path-containment'
 import { listMarkdownDocuments, markdownDocumentsFromRelativePaths } from '../markdown-documents'
 import { recordCrashBreadcrumb } from '../../crash-reporting/crash-breadcrumb-store'
+import { workspaceFsPromises } from '../../workspace-filesystem'
 import { buildReadDirErrorBreadcrumb, type ReadDirThrowSite } from '../readdir-error-diagnostics'
 import type { FilesystemHandlerContext } from './filesystem-handler-context'
 import {
@@ -39,7 +39,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
         }
         const dirPath = await resolveAuthorizedPath(args.dirPath, store)
         throwSite = 'readdir'
-        const entries = await readdir(dirPath, { withFileTypes: true })
+        const entries = await workspaceFsPromises.readdir(dirPath, { withFileTypes: true })
         const mapped = entries.map((entry) => ({
           name: entry.name,
           isDirectory: isDirectoryEntry(entry),
@@ -81,7 +81,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
       if (args.includeLocalLogMetadata === true) {
         return readLocalLogSnapshot(filePath)
       }
-      const stats = await stat(filePath)
+      const stats = await workspaceFsPromises.stat(filePath)
       const mimeType = PREVIEWABLE_BINARY_MIME_TYPES[extname(filePath).toLowerCase()]
       const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
       if (stats.size > sizeLimit) {
@@ -91,7 +91,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
       }
 
       if (mimeType) {
-        const buffer = await readFile(filePath)
+        const buffer = await workspaceFsPromises.readFile(filePath)
         return {
           content: buffer.toString('base64'),
           isBinary: true,
@@ -106,7 +106,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
         return { content: '', isBinary: true }
       }
 
-      const buffer = await readFile(filePath)
+      const buffer = await workspaceFsPromises.readFile(filePath)
       if (isBinaryBuffer(buffer)) {
         return { content: '', isBinary: true }
       }
@@ -142,7 +142,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
         return { size: result.size, isDirectory: result.type === 'directory', mtime: result.mtime }
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
-      const stats = await stat(filePath)
+      const stats = await workspaceFsPromises.stat(filePath)
       return { size: stats.size, isDirectory: stats.isDirectory(), mtime: stats.mtimeMs }
     }
   )
@@ -157,7 +157,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
           return true
         }
         const filePath = await resolveAuthorizedPath(args.filePath, store)
-        await stat(filePath)
+        await workspaceFsPromises.stat(filePath)
         return true
       } catch (error) {
         if (isENOENT(error)) {

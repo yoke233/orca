@@ -1,5 +1,5 @@
-import { lstat, rm } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { authorizeExternalPath } from './filesystem-auth'
 import { isENOENT } from './filesystem-path-containment'
 import type { ImportItemResult } from './filesystem-import-result-types'
@@ -27,9 +27,9 @@ export async function importOneSource(
   // Why: validate source using lstat on the unresolved path *before*
   // canonicalization so top-level symlinks are rejected instead of being
   // silently dereferenced by realpath.
-  let sourceStat: Awaited<ReturnType<typeof lstat>>
+  let sourceStat: Awaited<ReturnType<typeof workspaceFsPromises.lstat>>
   try {
-    sourceStat = await lstat(resolvedSource)
+    sourceStat = await workspaceFsPromises.lstat(resolvedSource)
   } catch (error) {
     if (isENOENT(error)) {
       return { sourcePath, status: 'skipped', reason: 'missing' }
@@ -83,7 +83,7 @@ export async function importOneSource(
       : copyLocalFileNoFollow(resolvedSource, destPath))
   } catch (error) {
     if (isDir) {
-      await rm(destPath, { recursive: true, force: true }).catch(() => {})
+      await workspaceFsPromises.rm(destPath, { recursive: true, force: true }).catch(() => {})
     }
     return {
       sourcePath,
@@ -145,7 +145,7 @@ async function deconflictName(
 
 async function nameExists(dir: string, name: string): Promise<boolean> {
   try {
-    await lstat(join(dir, name))
+    await workspaceFsPromises.lstat(join(dir, name))
     return true
   } catch (error) {
     if (isENOENT(error)) {

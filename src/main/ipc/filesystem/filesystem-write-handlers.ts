@@ -1,9 +1,9 @@
 import { ipcMain, shell } from 'electron'
-import { lstat, writeFile } from 'node:fs/promises'
 import type { SshMutationExpectation } from '../../../shared/ssh-types'
 import { assertSshMutationExpectation } from '../../ssh/ssh-connection-generation'
 import { requireSshFilesystemProvider } from '../../providers/ssh-filesystem-dispatch'
 import { tryDeleteWslUncPath } from '../../wsl-unc-delete'
+import { workspaceFsPromises } from '../../workspace-filesystem'
 import { authorizeExternalPath, resolveAuthorizedPath } from '../filesystem-auth'
 import { isENOENT } from '../filesystem-path-containment'
 import { registerFilesystemMutationHandlers } from '../filesystem-mutations'
@@ -30,7 +30,7 @@ export function registerFilesystemWriteHandlers(context: FilesystemHandlerContex
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
       try {
-        const fileStats = await lstat(filePath)
+        const fileStats = await workspaceFsPromises.lstat(filePath)
         if (fileStats.isDirectory()) {
           throw new Error('Cannot write to a directory')
         }
@@ -39,7 +39,7 @@ export function registerFilesystemWriteHandlers(context: FilesystemHandlerContex
           throw error
         }
       }
-      await writeFile(filePath, args.content, 'utf-8')
+      await workspaceFsPromises.writeFile(filePath, args.content, 'utf-8')
     }
   )
 

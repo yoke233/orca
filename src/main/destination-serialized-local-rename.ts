@@ -1,6 +1,6 @@
-import { realpath, rename } from 'node:fs/promises'
 import { dirname, normalize } from 'node:path'
 import { assertNoClobberRenameDestinationAvailable } from '../shared/filesystem-rename-collision'
+import { workspaceFsPromises } from './workspace-filesystem'
 
 // Why: parent scope covers native Unicode aliases without guessing each filesystem's collation.
 const pendingRenamesByParent = new Map<string, Promise<void>>()
@@ -14,7 +14,7 @@ function isENOENT(error: unknown): boolean {
 async function destinationParentKey(filePath: string): Promise<string> {
   const parentPath = dirname(filePath)
   try {
-    return normalize(await realpath(parentPath))
+    return normalize(await workspaceFsPromises.realpath(parentPath))
   } catch (error) {
     // A missing parent will fail the rename; retain its path so that failure
     // does not prevent unrelated destinations from progressing.
@@ -39,8 +39,8 @@ export async function renameLocalPathSerializedByDestination(
 
   await previous
   try {
-    await assertNoClobberRenameDestinationAvailable(oldPath, newPath)
-    await rename(oldPath, newPath)
+    await assertNoClobberRenameDestinationAvailable(oldPath, newPath, workspaceFsPromises)
+    await workspaceFsPromises.rename(oldPath, newPath)
   } finally {
     release()
     if (pendingRenamesByParent.get(key) === current) {
