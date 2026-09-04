@@ -41,10 +41,11 @@ const ENTRY_POINTS = [
   path.join(ROOT, 'src', 'main', 'orcad', 'main.ts')
 ]
 
-// Native addons and electron cannot be bundled; externalising them is what the
-// relay build already does (config/scripts/build-relay.mjs).
+// Native addons and Electron-only builtins cannot be bundled; externalising them is what the
+// packaged runtime and relay builds already do.
 const EXTERNAL = [
   'electron',
+  'original-fs',
   'node-pty',
   '@parcel/watcher',
   'better-sqlite3',

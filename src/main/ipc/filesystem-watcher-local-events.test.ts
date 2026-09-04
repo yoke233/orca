@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Event as WatcherEvent } from '@parcel/watcher'
 import type { FsChangedPayload } from '../../shared/filesystem-entry-types'
 import { WATCH_BATCH_TRAILING_MS } from '../../shared/filesystem-watch-batch-window'
+import { normalizeWatcherEventPath } from './filesystem-watcher-paths'
 
 const { statMock, subscribeMock } = vi.hoisted(() => ({
   statMock: vi.fn(),
   subscribeMock: vi.fn()
 }))
 
-vi.mock('fs/promises', () => ({ stat: statMock }))
+vi.mock('../workspace-filesystem', () => ({ workspaceFsPromises: { stat: statMock } }))
 vi.mock('./parcel-watcher-process', () => ({ subscribeViaWatcherProcess: subscribeMock }))
 
 import { createLocalWatcher } from './filesystem-watcher-local-events'
@@ -51,8 +52,8 @@ describe('local filesystem watcher flush serialization', () => {
     statMock.mockReturnValueOnce(firstStat.promise).mockReturnValueOnce(secondStat.promise)
     const root = await createLocalWatcher('/repo', '/repo')
     root.listeners.set(1, sender as never)
-    const firstPath = '/repo/first.ts'
-    const secondPath = '/repo/second.ts'
+    const firstPath = normalizeWatcherEventPath('/repo/first.ts')
+    const secondPath = normalizeWatcherEventPath('/repo/second.ts')
 
     watcherCallback?.(null, [{ type: 'update', path: firstPath }])
     vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
@@ -84,9 +85,9 @@ describe('local filesystem watcher flush serialization', () => {
     statMock.mockReturnValueOnce(firstStat.promise).mockReturnValueOnce(createStat.promise)
     const root = await createLocalWatcher('/repo', '/repo')
     root.listeners.set(1, sender as never)
-    const firstPath = '/repo/first.ts'
-    const transientPath = '/repo/transient.ts'
-    const replacedPath = '/repo/replaced.ts'
+    const firstPath = normalizeWatcherEventPath('/repo/first.ts')
+    const transientPath = normalizeWatcherEventPath('/repo/transient.ts')
+    const replacedPath = normalizeWatcherEventPath('/repo/replaced.ts')
 
     watcherCallback?.(null, [{ type: 'update', path: firstPath }])
     vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
@@ -132,14 +133,54 @@ describe('local filesystem watcher flush serialization', () => {
     expect(sender.send).not.toHaveBeenCalled()
   })
 
+  it('caps concurrent stats at eight for a full batch and keeps result order', async () => {
+    const eventCount = 5_000
+    const paths = Array.from({ length: eventCount }, (_, index) =>
+      normalizeWatcherEventPath(`/repo/file-${index}.ts`)
+    )
+    let inFlight = 0
+    let peakInFlight = 0
+    statMock.mockImplementation(async (statPath: string) => {
+      inFlight++
+      peakInFlight = Math.max(peakInFlight, inFlight)
+      await Promise.resolve()
+      inFlight--
+      return { isDirectory: () => statPath.endsWith('-0.ts') }
+    })
+    const root = await createLocalWatcher('/repo', '/repo')
+    root.listeners.set(1, sender as never)
+
+    watcherCallback?.(
+      null,
+      paths.map((path) => ({ type: 'update' as const, path }))
+    )
+    vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
+    // Why a loop, not a fixed microtask count: 5,000 stats through 8 lanes take many turns.
+    for (let i = 0; i < eventCount * 4 && sender.send.mock.calls.length === 0; i++) {
+      await Promise.resolve()
+    }
+
+    expect(statMock).toHaveBeenCalledTimes(eventCount)
+    expect(peakInFlight).toBe(8)
+    expect(sender.send).toHaveBeenCalledTimes(1)
+    const { events } = sender.send.mock.calls[0][1] as FsChangedPayload
+    expect(events).toEqual(
+      paths.map((path) => ({
+        kind: 'update',
+        absolutePath: path,
+        isDirectory: path.endsWith('-0.ts')
+      }))
+    )
+  })
+
   it('leaves an open debounce window to the armed timer instead of draining early', async () => {
     const firstStat = deferred<{ isDirectory: () => boolean }>()
     const secondStat = deferred<{ isDirectory: () => boolean }>()
     statMock.mockReturnValueOnce(firstStat.promise).mockReturnValueOnce(secondStat.promise)
     const root = await createLocalWatcher('/repo', '/repo')
     root.listeners.set(1, sender as never)
-    const transientPath = '/repo/transient.ts'
-    const otherPath = '/repo/other.ts'
+    const transientPath = normalizeWatcherEventPath('/repo/transient.ts')
+    const otherPath = normalizeWatcherEventPath('/repo/other.ts')
 
     watcherCallback?.(null, [{ type: 'update', path: '/repo/first.ts' }])
     vi.advanceTimersByTime(WATCH_BATCH_TRAILING_MS)
