@@ -2,7 +2,7 @@ import { basename, join, resolve } from 'node:path'
 import { workspaceFsPromises } from '../workspace-filesystem'
 import { authorizeExternalPath } from './filesystem-auth'
 import { isENOENT } from './filesystem-path-containment'
-import type { ImportItemResult } from './filesystem-import-result-types'
+import type { ImportItemResult } from '../../shared/filesystem-import-result-types'
 import {
   copyLocalFileNoFollow,
   preScanForSymlinks,
