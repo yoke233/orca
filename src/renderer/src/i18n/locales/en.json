@@ -106,6 +106,12 @@
     },
     "remote": {
       "findUnavailable": "Find in page is not available while this page streams from the remote host."
+    },
+    "userAgentMigration": {
+      "degradedDescription": "An old browser identity choice could not be inspected. Choose Cleaned or Native in Browser settings; changes take effect after a restart.",
+      "description": "Per-profile user-agent settings were removed. Choose Cleaned or Native in Browser settings; changes take effect after a restart.",
+      "title": "Browser identity is now app-wide",
+      "openSettings": "Open Settings"
     }
   },
   "editor": {
@@ -182,6 +188,20 @@
       "remoteBrowsing": {
         "heading": "Remote browsing",
         "headingDescription": "Where remote workspace pages render, and where their network traffic leaves from."
+      },
+      "userAgent": {
+        "title": "Browser identity",
+        "description": "Choose the user agent for every browser profile and page. Native mode disables Google sign-in. Changes take effect after a restart.",
+        "remoteUnsupported": "Manage browser identity on the remote host with the Orca CLI.",
+        "loading": "Loading…",
+        "resetRequired": "Identity data must be reset explicitly before it can be changed.",
+        "resetRequiredCommand": "Reset it from the command line: orca browser identity set --mode <mode> --reset",
+        "optionClean": "Cleaned",
+        "optionCleanTooltip": "Removes Orca and Electron tokens to match imported Chrome sessions.",
+        "optionNative": "Native",
+        "optionNativeTooltip": "Keeps Electron's built-in identity for sites that reject the cleaned identity. Google sign-in is unavailable in Native mode.",
+        "restartRequired": "Restart required",
+        "unavailable": "Browser identity is unavailable."
       }
     }
   },
@@ -6864,7 +6884,10 @@
           "cliSkillTerminalTitle": "CLI skill setup",
           "cliSkillTerminalAria": "CLI skill install terminal",
           "installFailureUnknownReason": "Orca could not finish CLI registration and reported no reason.",
-          "installFailureConflictRemedy": "Remove {{value0}} and register again if it is no longer needed."
+          "installFailureConflictRemedy": "Remove {{value0}} and register again if it is no longer needed.",
+          "6f894ef9c2": "Show in Finder",
+          "cbe55e4d48": "Show in Explorer",
+          "9fd4023db0": "Show in File Manager"
         },
         "CliSkillRuntimeSetup": {
           "04325573f8": "WSL",
@@ -9255,6 +9278,13 @@
               "tunnel": "tunnel",
               "routing": "routing",
               "network": "network"
+            },
+            "userAgent": {
+              "identity": "identity",
+              "userAgent": "user agent",
+              "native": "native",
+              "cleaned": "cleaned",
+              "restart": "restart"
             }
           },
           "use": {
@@ -11651,7 +11681,6 @@
           "account": "Orca account",
           "connected": "Connected",
           "signInRequired": "Sign in is required to upload and manage artifacts.",
-          "signingIn": "Signing in…",
           "signIn": "Sign in to Orca",
           "title": "Artifacts",
           "description": "Share HTML and Markdown files with your team and manage their public links.",
@@ -11696,7 +11725,6 @@
           "checking": "Checking account status…",
           "account": "Orca account",
           "signOut": "Sign out",
-          "signingIn": "Signing in…",
           "signInAgain": "Sign in again",
           "signIn": "Sign in to Orca",
           "title": "Orca Account",
@@ -11761,7 +11789,6 @@
           "signInTitle": "Sign in to share skills",
           "signInWebDescription": "Publishing and link management are available in the Orca desktop app.",
           "signInDescription": "Use your Orca account to publish bundles and manage their links. Recipients do not need an account.",
-          "signingIn": "Signing in…",
           "signInAgain": "Sign in again",
           "signIn": "Sign in to Orca",
           "howToTitle": "How to share skills",
@@ -13379,6 +13406,12 @@
             "90cabf6cfc": "Stack this PR above #{{value0}}",
             "ff81473a57": "Creates a GitHub Stack or extends the parent's existing stack.",
             "29732f2fb0": "new PR"
+          },
+          "AiVaultSearchEvidence": {
+            "sourceUnverifiable": "Transcript availability could not be verified",
+            "sourceMissing": "Transcript is no longer available",
+            "metadataMatch": "Match in session metadata",
+            "sourceActionsUnavailable": "The transcript source is unavailable."
           }
         }
       },
@@ -16792,7 +16825,6 @@
           "refresh": "Refresh",
           "signInHeading": "Sign in to Orca",
           "signInCopy": "Sign in to view and manage artifacts shared through your account.",
-          "signingIn": "Signing in…",
           "signIn": "Sign in to Orca",
           "empty": "No shared artifacts",
           "emptyCopy": "Open an HTML or Markdown file and select Share as artifact, or ask your agent to share it.",
@@ -16841,7 +16873,6 @@
           "confirmDescription": "This publishes the current file at a link anyone with the URL can view.",
           "accountTitle": "Orca account",
           "accountDescription": "Sign in to create and manage this link.",
-          "signingIn": "Signing in…",
           "signInAgain": "Sign in again",
           "signIn": "Sign in",
           "publishingOffTitle": "Artifact sharing is off",
@@ -16946,7 +16977,6 @@
         "4b7d2e8f1a": "Connect Orca Mobile to this desktop across cellular or any Wi-Fi.",
         "9a4c6b2d7e": "Skill sharing",
         "3d8e5f1b9c": "Share skills behind an unlisted link and install them on any machine you use.",
-        "7e1a9c4d2f": "Signing in…",
         "c5b3e8a17d": "Sign in to Orca"
       }
     },
@@ -17286,7 +17316,10 @@
         "title": "Allow {{value0}}?",
         "allow": "Allow",
         "deny": "Deny",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "reason": "Reason",
+        "blockedPath": "Blocked path",
+        "askRule": "Ask rule"
       },
       "launchPromptNotDelivered": "Not delivered — check the terminal",
       "structuredSessionCloseFailed": "Could not close this chat session",
@@ -17843,6 +17876,71 @@
       "working": "working",
       "stopped": "stopped",
       "finished": "finished"
+    }
+  },
+  "sessionSearch": {
+    "panel": {
+      "rankedResults": "Best matches",
+      "noMatches": "No matching sessions in the indexed history. Try another query or scope.",
+      "loadMore": "Load more matches",
+      "indexedHistory": "Indexed history · best matches",
+      "hostsSkipped": "Not searched: {{value0}}",
+      "consent": "Enable full-text search? Orca builds an index on this computer from local agent transcripts, including full conversations and up to 3,072 characters per tool output. Content is not redacted. Authenticated paired clients can search it.",
+      "remoteDisabled": "Search is disabled on this computer. Enable transcript indexing on that computer to search its sessions.",
+      "notReady": "The search index is not ready yet. Try again shortly.",
+      "noService": "Search is unavailable on this computer. It may need an Orca update or a runtime with search support.",
+      "failed": "Could not search this computer. Check its connection and try again.",
+      "changed": "The index changed while searching. Search again for current results.",
+      "truncated": "Some results or matching text were limited. Narrow your search for more precise results.",
+      "enableFailed": "Could not enable search. Try again.",
+      "enable": "Enable",
+      "notNow": "Not now",
+      "retry": "Try again"
+    }
+  },
+  "sessionHistory": {
+    "status": {
+      "checking": "Checking…",
+      "error": "Could not check status. Retrying…",
+      "unavailable": "Search is not available on this computer right now.",
+      "unreadable": "{{failed}} sessions could not be read and will be retried.",
+      "roots": "{{roots}} session folders could not be checked.",
+      "searchable": "{{sessions}} sessions · {{messages}} messages searchable",
+      "searchableSessions": "{{sessions}} sessions searchable",
+      "catchingUp": "{{indexed}} of {{total}} sessions · {{messages}} messages searchable",
+      "catchingUpSessions": "{{indexed}} of {{total}} sessions searchable"
+    },
+    "settings": {
+      "saveError": "Could not save. Try again.",
+      "advanced": "Advanced",
+      "deleteIndexCopy": "Clear search data",
+      "deleteTitle": "Clear search data on this computer?",
+      "deleteEnabled": "Turns off search and removes the searchable copy from this computer. Your agent sessions are not affected.",
+      "deleteDisabled": "Removes the searchable copy from this computer. Your agent sessions are not affected.",
+      "delete": "Clear",
+      "cleared": "Search data cleared.",
+      "clearError": "Could not clear search data. Try again.",
+      "webUnsupported": "Turn on session search from the Orca desktop app on that computer.",
+      "title": "Agent Session Search",
+      "description": "Search everything your agents have said and done, on this computer and on any paired Orca server.",
+      "searchDescription": "Turn on session search for this computer and paired servers, or clear search data.",
+      "indexComputers": "Search inside sessions",
+      "computersConsent": "Each computer keeps a searchable copy of its own agent conversations and tool output. Nothing leaves that computer.",
+      "serverVersion": "Orca v{{version}}",
+      "rowSwitchLabel": "Search sessions on {{host}}",
+      "serverOffline": "Offline",
+      "serverTooOld": "Needs a newer version of Orca.",
+      "updateServer": "Update server",
+      "serverToggleError": "Could not change session search on {{host}}. Try again.",
+      "clearedAndTurnedOff": "Search turned off and search data cleared.",
+      "thisComputer": "This computer",
+      "remoteServers": "Orca remote servers",
+      "showMore": "Show {{count}} more",
+      "showFewer": "Show fewer",
+      "openInSidebar": "Open in the sidebar",
+      "openInSidebarCopy": "Type what you remember, or ask an agent: “find the session where we fixed the login timeout.”",
+      "open": "Open",
+      "enableOnAll": "Enable on all computers"
     }
   },
   "aiVault": {

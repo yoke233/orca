@@ -79,6 +79,7 @@ export const AI_VAULT_SESSION_TITLES_RUNTIME_CAPABILITY = 'aiVault.session-title
 // offscreen backend). Advertised only when that backend is actually available, so
 // clients never fall back to a local desktop browser tab for a remote-owned page.
 export const BROWSER_HEADLESS_RUNTIME_CAPABILITY = 'browser.headless.v1' as const
+export const BROWSER_IDENTITY_RUNTIME_CAPABILITY = 'browser.identity.v1' as const
 export const BROWSER_SCREENCAST_RUNTIME_CAPABILITY = 'browser.screencast.v1' as const
 export const BROWSER_CERTIFICATE_TRUST_RUNTIME_CAPABILITY = 'browser.certificate-trust.v1' as const
 // Why: older hosts discard browser.tabCreate's page field, so clients may only
@@ -249,7 +250,21 @@ export const NOTIFICATIONS_REMOTE_PUSH_RUNTIME_CAPABILITY = 'notifications.remot
  * picks: a structured session it can open, or a terminal agent. A client that renders only one of
  * the two keeps using the surface-specific methods.
  */
-export const AGENT_LAUNCH_RUNTIME_CAPABILITY = 'agent.launch.v1' as const
+// v2 makes prompt delivery an outcome union and top-level warnings the only supported shape.
+export const AGENT_LAUNCH_RUNTIME_CAPABILITY = 'agent.launch.v2' as const
+
+/**
+ * The host admits `agent.launch` through the durable operation ledger, so a caller that names its
+ * launch with `operationId` gets exactly one execution and a recorded answer on every retry.
+ *
+ * This one is negotiated host-to-client, unlike `agent.launch.v1`, because of how RPC params
+ * degrade: an older host strips `operationId` as an unknown key and runs the launch anyway, with no
+ * error. A client that retried on the strength of having sent an id would get a second agent and
+ * never learn why. So `operationId` is optional on the wire — shipped mobile sends none and keeps
+ * today's behaviour verbatim — and a client may only treat a retry as safe once the host has
+ * advertised this.
+ */
+export const AGENT_LAUNCH_REPLAY_RUNTIME_CAPABILITY = 'agent.launch.replay.v1' as const
 
 // Generic native clients include the CLI and must not claim Electron-only page
 // placement support.
@@ -357,7 +372,8 @@ export const RUNTIME_CAPABILITIES = [
   AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
   AUTOMATION_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY,
   NOTIFICATIONS_REMOTE_PUSH_RUNTIME_CAPABILITY,
-  AGENT_LAUNCH_RUNTIME_CAPABILITY
+  AGENT_LAUNCH_RUNTIME_CAPABILITY,
+  AGENT_LAUNCH_REPLAY_RUNTIME_CAPABILITY
 ] as const
 
 export type RuntimeCapability = (typeof RUNTIME_CAPABILITIES)[number] | (string & {})
