@@ -134,5 +134,7 @@ export function finalizeLocalPtySpawnEnvironment(args: {
     plan.shellReadyLaunch = spawn.command ? shellLaunch : null
     plan.primaryLaunchEnvKeys = Object.keys(shellLaunch.env)
   }
+  // Crashpad's pipe belongs to the parent Electron process and is invalid in a terminal child.
+  delete env.CHROME_CRASHPAD_PIPE_NAME
   return historyResult
 }

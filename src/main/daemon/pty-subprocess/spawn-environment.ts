@@ -186,4 +186,6 @@ export function finalizeDaemonPtyEnvironment(
   promoteAgentTeamsShimPath(env, requestedPath)
   stripLegacyTerminalShimEnv(env, process.platform)
   dropIncoherentCondaActivationEnv(env, process.platform)
+  // Crashpad's pipe belongs to the parent Electron process and is invalid in a terminal child.
+  delete env.CHROME_CRASHPAD_PIPE_NAME
 }

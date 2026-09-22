@@ -313,6 +313,24 @@ describe('createPtySubprocess', () => {
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined()
   })
 
+  it('does not pass Orca Crashpad pipe state to a shell', async () => {
+    spawnMock.mockReturnValue(mockPtyProcess())
+    const previous = process.env.CHROME_CRASHPAD_PIPE_NAME
+    process.env.CHROME_CRASHPAD_PIPE_NAME = 'stale-orca-pipe'
+
+    try {
+      await createPtySubprocess({ sessionId: 'test', cols: 80, rows: 24 })
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CHROME_CRASHPAD_PIPE_NAME
+      } else {
+        process.env.CHROME_CRASHPAD_PIPE_NAME = previous
+      }
+    }
+
+    expect(spawnMock.mock.calls.at(-1)?.[2].env.CHROME_CRASHPAD_PIPE_NAME).toBeUndefined()
+  })
+
   it('does not forward a half-activated conda env from the daemon process env', async () => {
     // Why here as well as the main process: the daemon fork composes its own
     // inherited env, which main never sees, so it is the default terminal's

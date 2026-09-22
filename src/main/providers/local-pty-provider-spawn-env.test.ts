@@ -191,6 +191,26 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.CUSTOM_VAR).toBe('custom-value')
     })
 
+    it('does not pass Orca Crashpad pipe state to a shell', async () => {
+      const previous = process.env.CHROME_CRASHPAD_PIPE_NAME
+      process.env.CHROME_CRASHPAD_PIPE_NAME = 'stale-orca-pipe'
+      provider.configure({
+        buildSpawnEnv: (_id, env) => ({ ...env, CHROME_CRASHPAD_PIPE_NAME: 'stale-orca-pipe' })
+      })
+
+      try {
+        await provider.spawn({ cols: 80, rows: 24 })
+      } finally {
+        if (previous === undefined) {
+          delete process.env.CHROME_CRASHPAD_PIPE_NAME
+        } else {
+          process.env.CHROME_CRASHPAD_PIPE_NAME = previous
+        }
+      }
+
+      expect(spawnMock.mock.calls.at(-1)?.[2].env.CHROME_CRASHPAD_PIPE_NAME).toBeUndefined()
+    })
+
     it('re-reads buildSpawnEnv after a reentrant configuration change', async () => {
       const initialBuildSpawnEnv = vi.fn((_id: string, env: Record<string, string>) => env)
       const configuredBuildSpawnEnv = vi.fn((_id: string, env: Record<string, string>) => env)
