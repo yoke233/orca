@@ -36,6 +36,7 @@ export function VaultSessionRow({
   vaultScope,
   detailsExpanded,
   resumeDisabled,
+  resumeHidden,
   onToggleDetails,
   onJumpToOriginalPane,
   showJumpToWorktree,
@@ -65,6 +66,7 @@ export function VaultSessionRow({
   vaultScope: AiVaultScope
   detailsExpanded: boolean
   resumeDisabled: boolean
+  resumeHidden?: boolean
   onToggleDetails: () => void
   onJumpToOriginalPane?: () => void
   showJumpToWorktree: boolean
@@ -122,7 +124,7 @@ export function VaultSessionRow({
         ...(resumeStartup.env ? { env: resumeStartup.env } : {}),
         ...(resumeStartup.envToDelete ? { envToDelete: resumeStartup.envToDelete } : {}),
         ...(resumeStartup.launchConfig ? { launchConfig: resumeStartup.launchConfig } : {}),
-        realHomeStartup: realHomeResumeStartup
+        ...(session.structuredSession ? {} : { realHomeStartup: realHomeResumeStartup })
       })
       window.dispatchEvent(new Event(AI_VAULT_SESSION_DRAG_START_EVENT))
     },
@@ -179,6 +181,7 @@ export function VaultSessionRow({
               detailsId={detailsId}
               detailsTooltip={detailsTooltip}
               resumeDisabled={resumeDisabled}
+              resumeHidden={resumeHidden}
               resumeLabel={resumeLabel}
               worktreeInfo={worktreeInfo}
               onToggleDetails={onToggleDetails}
@@ -244,6 +247,7 @@ export function VaultSessionRow({
         <SessionActionMenuItems
           menuKind="context"
           resumeDisabled={resumeDisabled}
+          resumeHidden={resumeHidden}
           resumeLabel={resumeLabel}
           onJumpToOriginalPane={onJumpToOriginalPane}
           showJumpToWorktree={showJumpToWorktree}

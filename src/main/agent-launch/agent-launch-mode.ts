@@ -32,6 +32,7 @@ import {
 } from '../../shared/structured-native-chat-launch-route'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { hasExplicitTuiLaunchCommand } from '../../shared/tui-agent-launch-command-override'
+import type { WorkspaceLaunchKind } from '../../shared/workspace-launch-kind'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 
 // The receipt is part of the launch contract, so it is declared with the rest of it; re-exported
@@ -67,6 +68,14 @@ export type AgentLaunchModePlacement = {
   on?: string
   /** An existing terminal being reused. */
   terminal?: string
+  /** Which kind of workspace the launch lands in, derived by the host from the workspace it
+   *  resolved — never accepted from a caller, which would let one route around this decision.
+   *  Absent means the kind was never established, and is not read as any particular kind. */
+  workspaceKind?: WorkspaceLaunchKind
+  /** A start directory other than the workspace root. It belongs here, unlike `model` or `effort`,
+   *  because a structured session has no way to apply one — it runs in its workspace — so honouring
+   *  it and honouring the chat preference are mutually exclusive rather than merely awkward. */
+  cwd?: string
 }
 
 const DOWNGRADE_DETAIL: Record<Exclude<AgentLaunchModeReason, 'user_default'>, string> = {
@@ -131,10 +140,15 @@ export function decideAgentLaunchMode(args: {
     executionHostId: placement.on ? `runtime:${placement.on}` : 'local',
     reusesTerminal: Boolean(placement.terminal),
     hostCapabilities: RUNTIME_CAPABILITIES,
-    // A resolved managed worktree or folder workspace is never a floating terminal. WSL is left to
-    // the executing host's own create-support probe, which reads the resolved workspace rather
-    // than guessing from a client-side project runtime.
-    requiresTuiLaunchCommand: hasExplicitTuiLaunchCommand(settings, agent)
+    // The floating workspace has nowhere to keep a session, so it is decided here rather than left
+    // to the host probe below, which cannot answer for a workspace with no record. WSL still is:
+    // the create-support probe reads the resolved workspace rather than guessing from a
+    // client-side project runtime.
+    ...(placement.workspaceKind ? { workspaceKind: placement.workspaceKind } : {}),
+    // Mirrors the renderer's own route input (`agent-launch-route-input.ts`), which has always
+    // treated a requested cwd as terminal-only; the host simply had no way to be told about one.
+    requiresTuiLaunchCommand:
+      Boolean(placement.cwd?.trim()) || hasExplicitTuiLaunchCommand(settings, agent)
   })
   if (!support.supported) {
     return downgraded(BLOCKER_REASON[support.blocker], vocabulary)

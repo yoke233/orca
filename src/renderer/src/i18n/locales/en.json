@@ -2,8 +2,8 @@
   "sidebar": {
     "revealFiltered": {
       "title": "Reveal hidden workspace?",
-      "description": "The active workspace is hidden in the sidebar. Revealing it will clear your sidebar filters.",
-      "confirm": "Clear filters and reveal",
+      "description": "The active workspace is hidden in the sidebar. Revealing it will adjust only the filters hiding it.",
+      "confirm": "Adjust filters and reveal",
       "cancel": "Keep filters"
     }
   },
@@ -118,6 +118,9 @@
     "richMarkdown": {
       "tooLarge": "File is larger than the {{limit}} rich editing limit. Showing source mode instead.",
       "openAnyway": "Open anyway"
+    },
+    "fileLoad": {
+      "hostUnresolved": "The host couldn't find this file's workspace. It may have been removed, or the host may not know about it yet. Retry, or close this tab from the tab strip."
     }
   },
   "githubChecks": {
@@ -580,6 +583,7 @@
           "9e2a9bb87b": "Continue",
           "6f8056a565": "Command Code",
           "4238b771b5": "Codebuff",
+          "b0b350de65": "Freebuff",
           "cbaf0c2e0b": "Cline",
           "1f8a19e9ad": "Autohand Code",
           "5e8eff11b3": "Auggie",
@@ -604,7 +608,8 @@
           "da41abbdd4": "Ante",
           "060d152fb5": "Trae",
           "d443a47995": "Prime Agent",
-          "mimo_code_label": "MiMo Code"
+          "mimo_code_label": "MiMo Code",
+          "opencode2_label": "OpenCode 2"
         },
         "skill": {
           "cli": {
@@ -1678,13 +1683,14 @@
         "326a578923": "orca.yaml + local",
         "2132b670da": "both",
         "0e587e31fb": "yaml",
-        "ac3748dcda": "Name or 'Create From'",
+        "ac3748dcda": "Create From",
         "f660aa1454": "Connecting",
         "7711ad5122": "Local setup command",
         "e5db1b0419": "Combined setup command",
         "runOn": "Run on",
         "addProjectBeforeWorkspace": "Add a project before creating a workspace.",
         "connectProjectFirst": "Connect this project first",
+        "defaultBranchUpdateFailed": "Could not update the project default branch. Try again.",
         "connectSourceLookup": "Connect",
         "reconnectSourceLookup": "Reconnect",
         "setupHostExistingFolderTitle": "Set up {{value0}}",
@@ -1941,6 +1947,29 @@
       },
       "SelectedTextCopyMenu": {
         "9b40d7b018": "Copy"
+      },
+      "NativeChatResumeOnRestartModal": {
+        "title": "Resume interrupted chats?",
+        "body": "These chats were mid-turn when Orca closed. Resuming restores each one where it stopped, with its full context, and asks the agent to check its last action before carrying on. Your own prompt is not re-sent.",
+        "updateBody": "These chats were mid-turn when Orca installed an update. Resuming restores each one where it stopped, with its full context, and asks the agent to check its last action before carrying on. Your own prompt is not re-sent.",
+        "resuming": "Resuming…",
+        "untitled": "Untitled chat",
+        "listLabel": "Chats that would be resumed",
+        "dontAskAgain": "Don't ask again (resume automatically)",
+        "dontAskAgainHint": "You can turn this off in Settings → Experimental → Chat UI.",
+        "continuedOne": "Resumed 1 chat and asked it to continue",
+        "continuedMany": "Resumed {{value0}} chats and asked them to continue",
+        "selectAgent": "Resume {{value0}} chat \"{{value1}}\" in {{value2}}",
+        "resumeSelected": "Resume {{value0}} chats",
+        "resumeSelectedOne": "Resume 1 chat",
+        "continueUnconfirmed": "Continuation delivery is unconfirmed for {{value0}} chats. Open them to check before sending another message.",
+        "continueUnconfirmed_one": "Continuation delivery is unconfirmed for {{value0}} chat. Open it to check before sending another message.",
+        "continueUnconfirmed_other": "Continuation delivery is unconfirmed for {{value0}} chats. Open them to check before sending another message.",
+        "continueRefused": "{{value0}} chats could not be continued. Open them to continue manually.",
+        "continueRefused_one": "{{value0}} chat could not be continued. Open it to continue manually.",
+        "continueRefused_other": "{{value0}} chats could not be continued. Open them to continue manually.",
+        "dismissAll": "Dismiss all",
+        "dismissUnconfirmed": "Dismissing the resume offer was not confirmed — it may still be in the status bar."
       },
       "StarNagCard": {
         "92b0f9d921": "is authenticated and try again.",
@@ -2315,7 +2344,8 @@
         "0f3066256e": "Previous match",
         "42e466b9f1": "Regex",
         "90c61387d9": "Case sensitive",
-        "e07012f26e": "Search..."
+        "e07012f26e": "Search...",
+        "10e039b591": "No results"
       },
       "UpdateCard": {
         "68b235d264": "Restart to Update",
@@ -3101,6 +3131,7 @@
         },
         "pane": {
           "CloseTerminalDialog": {
+            "automatic_resume_warning": "This terminal will not resume automatically. Cancel and put the workspace to sleep to resume it later.",
             "ebd2fa844d": "Close",
             "1d1a7a9c1f": "Cancel",
             "6b9a6975f8": "The terminal still has a running process. If you close the terminal, the process will be killed.",
@@ -4028,6 +4059,13 @@
             "contact_note": "The host may still be running; only the Orca connection is unavailable.",
             "last_connected": "Last connected {{value0}}",
             "reconnect_attempt": "Attempt {{value0}}"
+          },
+          "NativeChatResumeStatusSegment": {
+            "labelOne": "1 chat to resume",
+            "label": "{{value0}} chats to resume",
+            "ariaLabelOne": "1 chat available to resume",
+            "ariaLabel": "{{value0}} chats available to resume",
+            "tooltip": "Open interrupted chats available to resume"
           }
         }
       },
@@ -4137,7 +4175,8 @@
           "rangeLast7Days": "Last 7 days",
           "rangeLast30Days": "Last 30 days",
           "rangeLast90Days": "Last 90 days",
-          "rangeAllTime": "All time"
+          "rangeAllTime": "All time",
+          "costExcludesUnpricedModels": "• excludes unpriced models"
         },
         "OpenCodeUsagePane": {
           "349f7c3f5c": "Total",
@@ -6076,7 +6115,8 @@
           "setParentFor": "Set parent for"
         },
         "WorktreeCardStatusSlot": {
-          "branchIdentity": "Branch"
+          "branchIdentity": "Branch",
+          "sleeping": "Sleeping"
         },
         "NewExternalWorktreesInboxLine": {
           "9f2d4c8b17": "Hide external worktrees permanently for {{value0}}",
@@ -6315,7 +6355,12 @@
         "RepoScanUnavailableIndicator": {
           "title": "Worktree scan failed for {{value0}}",
           "retry": "Retry scan",
-          "retained": "Existing worktrees are kept until a scan succeeds. Click to retry."
+          "retained": "Existing worktrees are kept until a scan succeeds. Click to retry.",
+          "xcodeLicense": "Apple developer tools require license acceptance before Git can run.",
+          "developerTools": "Apple command-line developer tools are missing or unavailable.",
+          "architectureMismatch": "A Git-related executable could not run because its CPU architecture is incompatible with this execution host. Install Git and related tools for the host architecture.",
+          "copyCommand": "Copy command",
+          "copyDiagnostics": "Copy diagnostics"
         }
       },
       "shared": {
@@ -6399,7 +6444,11 @@
           "922b51e02d": "Fe26.2**…",
           "0023cc336e": "Paste either the raw token value (e.g.",
           "a7e38affcd": "Fe26.2**… token or auth=Fe26.2**… header",
+          "d5267cce63": "). The auth cookie still covers workspace discovery; auth alone is not enough for usage. OpenCode Go auth is web-based and shared across Windows and WSL terminals.",
+          "62ab430f94": "Paste the full Cookie header from your browser's DevTools → Network → any opencode.ai request, including __Host-console_session (e.g.",
+          "37b4b4a3f7": "auth=…; __Host-console_session=…",
           "67e3c33670": "OpenCode Go session cookie",
+          "0335bd31d5": "Paste the full opencode.ai Cookie header, including __Host-console_session, for rate limit fetching.",
           "b2b1aa936d": "Paste your opencode.ai session cookie for rate limit fetching.",
           "36223200ac": "OpenCode Go Session Cookie",
           "ea631977b5": "Configure OpenCode Go provider settings.",
@@ -6504,6 +6553,11 @@
           "codexConfigSyncBlankSource": "Codex is still using the settings it last synced because {{value0}} is empty. That is expected while a synced folder finishes downloading.",
           "codexConfigSyncManagedHomeUnavailable": "Orca could not read this account’s Codex files just now, so settings may not be syncing. This usually clears on its own — antivirus or a backup tool briefly locks them.",
           "codexConfigSyncUnreadableSource": "Codex is still using the settings it last synced because {{value0}} could not be read. Check that file's permissions.",
+          "codexLoginLinkPending": "Codex opened this sign-in link in your browser. Copy it to finish signing in somewhere else — a private window, or another profile.",
+          "codexLoginLinkCopied": "Copied",
+          "codexLoginLinkCopy": "Copy link",
+          "codexLoginLinkOpen": "Open",
+          "codexLoginLinkCopyFailed": "Could not copy the link.",
           "d6f1b9b6a2": "MiniMax API key is required.",
           "7c5d8a4e1b": "MiniMax API key was not saved.",
           "4d2c7b9e83": "MiniMax API key saved.",
@@ -7072,7 +7126,10 @@
             "structuredTitle": "Use updated structured native chat",
             "structuredCopy": "Opt in to the host-owned structured chat runtime for Codex and Claude. Off keeps the existing terminal-backed chat path.",
             "structuredScope": "Local sessions only for now. WSL and remote execution hosts (including SSH) continue to use terminal chat, and Windows falls back to it unless Orca can read process start times.",
-            "structuredToggleLabel": "Toggle updated structured native chat"
+            "structuredToggleLabel": "Toggle updated structured native chat",
+            "resumeTitle": "Resume working chats automatically after a restart",
+            "resumeCopy": "When Orca quits or installs an update, chats that were mid-turn are automatically resumed when Orca is reopened.",
+            "resumeToggleLabel": "Toggle automatic resume after a restart"
           },
           "agentDashboard": {
             "title": "Agent Dashboard",
@@ -7143,7 +7200,9 @@
           "b82f86d7d2": "Rich Markdown Spellcheck",
           "5195f0b9ef": "Show browser spelling underlines and suggestions while editing rich Markdown.",
           "7ddd66fede": "Editor Word Wrap",
-          "9b18de6eea": "Wrap long lines in file editors instead of requiring horizontal scrolling."
+          "9b18de6eea": "Wrap long lines in file editors instead of requiring horizontal scrolling.",
+          "collapseUnchangedTitle": "Collapse Unchanged Regions",
+          "collapseUnchangedDescription": "Show only changed lines and a little surrounding context in a file diff, hiding the rest behind expandable bands. The View All Changes diff always collapses this way."
         },
         "AdvancedNetworkSettingsSection": {
           "3e431564b5": "localhost, 127.0.0.1, *.internal",
@@ -7160,6 +7219,8 @@
           "configureProxy": "Configure proxy"
         },
         "GeneralPane": {
+          "confirm_running_terminal_close": "Confirm before closing running terminals",
+          "confirm_running_terminal_close_description": "Ask before stopping a running agent or command when closing a terminal.",
           "d58fccfd84": "Navigation",
           "5cb5475664": "Confirm before closing pinned tabs",
           "36b2a5dc6d": "Show a confirmation dialog before a pinned tab is closed.",
@@ -8862,6 +8923,8 @@
             "4ee2029e9c": "OpenCode Go Workspace ID",
             "9c4e40cf6b": "session",
             "61f7d1fcbe": "cookie",
+            "37020a02c2": "console",
+            "25591bf95b": "Paste the full opencode.ai Cookie header, including __Host-console_session, for rate limit fetching.",
             "d1d2ae383c": "Paste your opencode.ai session cookie for rate limit fetching.",
             "6ed1401020": "OpenCode Go Session Cookie",
             "b7c2cee442": "experimental",
@@ -9682,6 +9745,11 @@
             "005be5c699": "Wrap long lines in file editors instead of requiring horizontal scrolling.",
             "editorFontFamily": "Editor Font Family",
             "editorFontFamilyDesc": "Font used by file editors and diff views. Leave empty to follow the terminal font.",
+            "collapseUnchanged": "Collapse Unchanged Regions",
+            "collapseUnchangedDesc": "Show only changed lines and a little surrounding context in a file diff, hiding the rest behind expandable bands. The View All Changes diff always collapses this way.",
+            "collapseUnchangedKw": "collapse",
+            "hideUnchangedKw": "hide unchanged",
+            "foldKw": "fold",
             "externalWorktrees": "External worktrees",
             "externalWorktreesDescription": "Choose whether worktrees created outside Orca appear by default.",
             "editorFontKw": "font",
@@ -9700,7 +9768,14 @@
             "sidebar": "sidebar",
             "867dddea41": "pinned",
             "5250cf0e48": "pin",
-            "afa37a34e1": "close"
+            "afa37a34e1": "close",
+            "running_terminal": "running",
+            "terminal": "terminal",
+            "agent": "agent",
+            "command": "command",
+            "confirm": "confirm",
+            "close": "close",
+            "omp": "OMP"
           }
         },
         "git": {
@@ -10198,6 +10273,12 @@
             "keepForkUpToDateDescription": "Safely fast-forward this fork from upstream.",
             "projectRuntime": "Project Runtime",
             "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "githubAccount": "GitHub Account",
+            "githubAccountDescription": "Bind a keyring gh login for this project’s GitHub API calls.",
+            "githubAccountKeyword": "github account",
+            "ghAccount": "gh account",
+            "login": "login",
+            "token": "token",
             "externalWorktrees": "External worktrees",
             "externalWorktreesDescription": "Override whether worktrees created outside Orca appear for this project.",
             "waitForSetupBeforeAgent": "wait for setup before starting agent",
@@ -11272,8 +11353,18 @@
           "descriptionOrca": "Links open in your system browser. When enabled, {{chord}}+click opens one in Orca's built-in browser instead."
         },
         "BrowserTerminalLinkActionsSetting": {
-          "title": "Show link actions",
-          "description": "Show available actions when you click a link in the terminal or a chat transcript. Turn this off to require {{modifier}}-click in the terminal."
+          "title": "Terminal URL clicks",
+          "description": "Show available actions when you click a link in the terminal or a chat transcript. Turn this off to require {{modifier}}-click in the terminal.",
+          "descriptionV2": "Control clicks on detected URLs printed in terminal panes and chat transcripts.",
+          "plainClickLabel": "Plain click",
+          "plainClickDescription": "Choose whether a left-click shows actions, opens the URL, or leaves it to the terminal. Cmd/Ctrl-click always opens directly.",
+          "plainClickAriaLabel": "Plain click URL behavior",
+          "middleClickLabel": "Middle click",
+          "middleClickDescription": "Choose what a mouse-wheel click does on a detected terminal URL.",
+          "middleClickAriaLabel": "Middle click",
+          "actionsLabel": "Actions",
+          "openUrlLabel": "Open URL",
+          "leaveToTerminalLabel": "Leave to terminal"
         },
         "PluginConsentDialog": {
           "workerTrust": "Background worker — runs its own process",
@@ -11648,6 +11739,7 @@
           "loadingBuilds": "Loading builds…",
           "noBuilds": "No builds found",
           "refresh": "Refresh build list",
+          "cacheHint": "Build lists are cached for 5 minutes. Refresh to check for new builds.",
           "switchTo": "Switch to build",
           "alreadyRunning": "This is the build you are running.",
           "willSwitch": "{{value0}} → {{value1}}",
@@ -11769,6 +11861,25 @@
           "on": "On",
           "auto": "Agent",
           "off": "Off"
+        },
+        "RepositoryGitHubAccountSection": {
+          "unsupported": "This runtime’s GitHub CLI is too old for account binding (needs gh ≥ 2.40).",
+          "capabilityUnknown": "Could not determine whether this runtime’s GitHub CLI supports account binding. Retry.",
+          "envToken": "Environment-token accounts cannot be bound. Use a keyring login.",
+          "invalidBinding": "That GitHub account binding is invalid.",
+          "unavailable": "That GitHub account is unavailable on this runtime.",
+          "saveFailed": "Could not save the GitHub account binding.",
+          "title": "GitHub Account",
+          "description": "Use a specific gh login for this project’s GitHub issue and pull request calls.",
+          "longDescription": "Orca injects a short-lived token from the selected keyring login into each gh call for this project. Project View stays on the ambient login.",
+          "retry": "Retry",
+          "selectLabel": "Account",
+          "ambient": "Default (ambient gh login)",
+          "unavailableOption": "{{user}} @ {{host}} (unavailable)",
+          "capabilityBlocked": "Binding is unavailable until this runtime’s GitHub CLI supports `gh auth token --user` (gh ≥ 2.40).",
+          "capabilityUnknownHint": "Could not determine GitHub CLI account-binding support on this runtime. Clear the binding or retry.",
+          "notEnforced": "Saved, but not enforced by this runtime (mixed-version host).",
+          "refreshAccounts": "Refresh GitHub accounts"
         },
         "shareSkills": {
           "title": "Share Skills",
@@ -11896,6 +12007,10 @@
           "targetDescription": "Higher values increase contrast where possible. Background colors stay unchanged.",
           "subtle": "Subtle",
           "strong": "Strong"
+        },
+        "TerminalRenderingSection": {
+          "6d4c55bacc": "Inline Images",
+          "fffab5890b": "Display images directly in the terminal using SIXEL, iTerm2 (IIP), and Kitty graphics protocols."
         }
       },
       "right": {
@@ -13085,8 +13200,6 @@
             "agentSessionQueued": "{{value0}} session queued",
             "sessionHistory": "Agent Session History",
             "agents": "Agents",
-            "shownRecent": "{{value0}} shown · {{value1}} recent",
-            "sessionsShownCompact": "{{value0}} shown",
             "resumePastSessions": "Resume past sessions",
             "refreshSessionHistory": "Refresh Session History",
             "searchSessions": "Search sessions",
@@ -13126,7 +13239,6 @@
             "agents": "Agents",
             "selectAllAgents": "Select all",
             "clearAgents": "Clear",
-            "sort": "Sort",
             "lastUpdated": "Last updated",
             "created": "Created",
             "group": "Group",
@@ -17194,6 +17306,8 @@
         "countOne": "1 tool call",
         "countN": "{{value0}} tool calls",
         "moreCalls": "+{{value0}} more",
+        "failedCount": "{{value0}} failed",
+        "failedCallsLabel": "Failed tool calls: {{value0}}",
         "runningPreview": "Running {{preview}}",
         "runningCommand": "Running command",
         "runningNamedPreview": "Running {{toolName}} {{preview}}",
@@ -17210,7 +17324,29 @@
         "renamedFile": "Renamed file",
         "copyDiff": "Copy diff",
         "diffGap": "Lines not shown",
-        "diffTruncated": "Diff truncated"
+        "diffTruncated": "Diff truncated",
+        "runReadOne": "Read 1 file",
+        "runReadMany": "Read {{value0}} files",
+        "runSearchOne": "Searched 1 time",
+        "runSearchMany": "Searched {{value0}} times",
+        "runListFilesOne": "Listed 1 directory",
+        "runListFilesMany": "Listed {{value0}} directories",
+        "runCommandOne": "Ran 1 command",
+        "runCommandMany": "Ran {{value0}} commands",
+        "runFileChangeOne": "Edited 1 file",
+        "runFileChangeMany": "Edited {{value0}} files",
+        "runWebSearchOne": "Searched the web 1 time",
+        "runWebSearchMany": "Searched the web {{value0}} times",
+        "runIntegrationOne": "Used 1 integration",
+        "runIntegrationMany": "Used {{value0}} integrations",
+        "runAgentOne": "Ran 1 agent",
+        "runAgentMany": "Ran {{value0}} agents",
+        "runPlanOne": "Updated the plan",
+        "runPlanMany": "Updated the plan {{value0}} times",
+        "runToolOne": "Used 1 tool",
+        "runToolMany": "Used {{value0}} tools",
+        "runPair": "{{value0}} and {{value1}}",
+        "runList": "{{value0}}, and {{value1}}"
       },
       "providerFrame": {
         "byteLength": "{{value0}} bytes"
@@ -17233,6 +17369,7 @@
         "command": "Background command",
         "monitor": "Background monitor",
         "task": "Background task",
+        "outputFile": "Output: {{value0}}",
         "detailsUnavailable": "Task details are unavailable for this session.",
         "countAgentsOne": "1 agent",
         "countAgentsMany": "{{value0}} agents",
@@ -17319,7 +17456,10 @@
         "cancel": "Cancel",
         "reason": "Reason",
         "blockedPath": "Blocked path",
-        "askRule": "Ask rule"
+        "askRule": "Ask rule",
+        "plan": {
+          "file": "Plan file"
+        }
       },
       "launchPromptNotDelivered": "Not delivered — check the terminal",
       "structuredSessionCloseFailed": "Could not close this chat session",
@@ -17880,11 +18020,15 @@
   },
   "sessionSearch": {
     "panel": {
-      "rankedResults": "Best matches",
+      "resultsOne": "{{count}} result",
+      "resultsOther": "{{count}} results",
       "noMatches": "No matching sessions in the indexed history. Try another query or scope.",
       "loadMore": "Load more matches",
-      "indexedHistory": "Indexed history · best matches",
+      "indexedHistory": "Indexed history",
       "hostsSkipped": "Not searched: {{value0}}",
+      "sortRelevance": "Most relevant",
+      "sortNewest": "Newest",
+      "sortResultsAriaLabel": "Sort results: {{value0}}",
       "consent": "Enable full-text search? Orca builds an index on this computer from local agent transcripts, including full conversations and up to 3,072 characters per tool output. Content is not redacted. Authenticated paired clients can search it.",
       "remoteDisabled": "Search is disabled on this computer. Enable transcript indexing on that computer to search its sessions.",
       "notReady": "The search index is not ready yet. Try again shortly.",
@@ -17894,8 +18038,14 @@
       "truncated": "Some results or matching text were limited. Narrow your search for more precise results.",
       "enableFailed": "Could not enable search. Try again.",
       "enable": "Enable",
-      "notNow": "Not now",
-      "retry": "Try again"
+      "retry": "Try again",
+      "scopeUnknown": "This computer does not have this workspace or project. Switch the scope to All to search everything on it.",
+      "sortSessionsAriaLabel": "Sort sessions: {{value0}}",
+      "sessionsOne": "{{count}} session",
+      "sessionsOther": "{{count}} sessions",
+      "sessionsOfLoaded": "{{value0}} of {{value1}} sessions",
+      "showMoreSessions": "Show more sessions",
+      "loadingMoreSessions": "Loading more sessions…"
     }
   },
   "sessionHistory": {

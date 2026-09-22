@@ -22,12 +22,12 @@ export function activeStructuredAgentSessionTurnId(
   return null
 }
 
-/** The same verdict for reduced items a caller holds unordered, so a reader that already has them
+/** The newest turn record for items a caller holds unordered, so a reader that already has them
  *  need not render and sort a whole snapshot to ask. Sequence is the ordering key the render pass
  *  sorts on, and ties resolve to the later-reduced item exactly as that stable sort would. */
-export function activeStructuredAgentSessionTurnIdBySequence(
+export function newestStructuredAgentSessionTurnBySequence(
   items: Iterable<AgentJournalRenderItem>
-): string | null {
+): AgentJournalTurnLifecycle | null {
   let newestSequence = 0
   let newest: AgentJournalTurnLifecycle | null = null
   for (const item of items) {
@@ -40,7 +40,35 @@ export function activeStructuredAgentSessionTurnIdBySequence(
       newest = turn
     }
   }
+  return newest
+}
+
+/** Whether that newest turn is still running, which is all most callers want. */
+export function activeStructuredAgentSessionTurnIdBySequence(
+  items: Iterable<AgentJournalRenderItem>
+): string | null {
+  const newest = newestStructuredAgentSessionTurnBySequence(items)
   return newest?.state === 'running' ? newest.turnId : null
+}
+
+/** The newest turn record whatever state it ended in, STATE INCLUDED. Restart resume compares both
+ *  halves against the teardown marker: the id alone cannot tell a turn that was interrupted from
+ *  one that finished, and offering a finished chat is the failure this feature exists to avoid.
+ *  The running-only readers above would answer null for exactly the sessions this has to identify,
+ *  because eviction settles them to `interrupted`.
+ *
+ *  Scans backwards rather than by sequence because every caller passes a rendered snapshot, which
+ *  is already in that order. Use the by-sequence reader above for items held unordered. */
+export function newestStructuredAgentSessionTurn(
+  items: readonly AgentJournalRenderItem[]
+): AgentJournalTurnLifecycle | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const turn = readAgentJournalTurn(items[index]?.body)
+    if (turn) {
+      return turn
+    }
+  }
+  return null
 }
 
 /**
