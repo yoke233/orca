@@ -1,19 +1,11 @@
 import { act, create } from 'react-test-renderer'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { BRIDGE_PROTOCOL_VERSION } from '../mobile-web-shell/bridge/bridge-envelope'
-import type { ForceReconnect, RpcClientContextValue } from './rpc-client-context-contract'
-
-const page = vi.hoisted(() => ({ read: (): RpcClientContextValue | null => null }))
-
-// The page bundle resolves `./client-context` to its `.web` sibling. Forwarded lazily rather than
-// re-exported, because the sibling imports these hooks back and an awaited mock of it deadlocks.
-vi.mock('./client-context', () => ({ useRpcClientContext: () => page.read() }))
+import type { ForceReconnect } from './rpc-client-context-contract'
 
 import { createShellPageClient } from '../mobile-web-shell/bridge/page-bootstrap'
-import { RpcClientProvider, useRpcClientContext } from './client-context.web'
+import { RpcClientProvider } from './client-context.web'
 import { useForceReconnect } from './host-client-hooks'
-
-page.read = useRpcClientContext
 
 const INIT = {
   v: BRIDGE_PROTOCOL_VERSION,

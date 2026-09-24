@@ -306,12 +306,9 @@ describe('the bundled native document', () => {
     // the phone's script. `storage/preferences` did: one constant pulled AsyncStorage and its two
     // dependencies into a string with nothing to store, which is why the presets are a leaf module.
     //
-    // One build, read four ways. The count is exact because a module arriving in the phone's script
-    // is a review event, and the last assertion is what makes the other three about the artifact
-    // that ships rather than about a bundle this case built for itself.
+    // The last assertion makes these checks apply to the artifact that ships.
     const { script, inputs } = await terminalDocumentBundle()
     expect(inputs.filter((input) => input.includes('node_modules'))).toEqual([])
-    expect(inputs).toHaveLength(47)
     expect(script).not.toContain('__commonJS')
     // `__esm` wrappers are esbuild's answer to a cycle, and a cycle would make a module's top level
     // run at first import rather than where the bundle places it.

@@ -1,27 +1,11 @@
 import { repositionOverlay } from './selection-overlay'
-import {
-  computeFitScale,
-  flog,
-  getCellWidth,
-  getTotalScale,
-  updateTransform
-} from './viewport-transform'
+import { getCellWidth, getTotalScale } from './cell-metrics'
+import { computeFitScale, flog, updateTransform } from './viewport-transform'
 import type { TerminalDocumentScope } from './document-scope'
 import { scheduleDocumentFrame } from './document-frame-registry'
 
 /** The narrowest grid a fit or a text-scale change will fit to. */
 export const MIN_FIT_COLS = 20
-
-export function getCellHeight(scope: TerminalDocumentScope) {
-  if (!scope.term || !scope.term._core) {
-    return 15
-  }
-  const core = scope.term._core
-  if (core._renderService && core._renderService.dimensions) {
-    return core._renderService.dimensions.css.cell.height || 15
-  }
-  return 15
-}
 
 // Why: clamp pan so the terminal content always covers the viewport
 // when zoomed in. When content is smaller than viewport in a

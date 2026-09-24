@@ -2,8 +2,8 @@ import { elementInRoot } from './document-host-seams'
 import { TERMINAL_TEXT_SCALES } from '../terminal-text-scales'
 import type { TerminalDocumentScope } from './document-scope'
 import { scheduleDocumentFrame } from './document-frame-registry'
-import { applyFitScale, getCellHeight, MIN_FIT_COLS } from './fit-scale'
-import { getCellWidth } from './viewport-transform'
+import { getCellHeight, getCellWidth } from './cell-metrics'
+import { applyFitScale, MIN_FIT_COLS } from './fit-scale'
 import { emitKeyboardAvoidanceMetrics } from './keyboard-avoidance-metrics'
 
 // Why: init() flips ready false on every re-init (live width reflow included)

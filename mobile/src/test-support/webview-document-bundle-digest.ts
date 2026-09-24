@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 
 /**
  * A WebView document bundle, built from somewhere else entirely, as a digest.
@@ -17,7 +18,7 @@ export function bundleDigestBuiltFrom(cwd: string, generator: string, member: st
     process.execPath,
     [
       '-e',
-      `Promise.all([import('node:crypto'), import(${JSON.stringify(generator)})]).then(` +
+      `Promise.all([import('node:crypto'), import(${JSON.stringify(pathToFileURL(generator).href)})]).then(` +
         `async ([crypto, generator]) => {` +
         `const { script } = await generator.${member}();` +
         `process.stdout.write(crypto.createHash('sha256').update(script).digest('hex'))` +

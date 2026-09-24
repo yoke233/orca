@@ -1,7 +1,8 @@
 import type { TerminalDocumentScope } from './document-scope'
 import { scheduleDocumentFrame } from './document-frame-registry'
 import { touchesInRoot } from './document-host-seams'
-import { clampPan, getCellHeight } from './fit-scale'
+import { getCellHeight, getTotalScale } from './cell-metrics'
+import { clampPan } from './fit-scale'
 import { notify } from './host-notify'
 import { attachSurfaceMouseClickDragHandler } from './mouse-click-drag'
 import { routeScrollLines, shouldRouteScrollToTerminalInput } from './mouse-input-encoding'
@@ -17,7 +18,7 @@ import {
   MIN_TEXT_SCALE,
   snapToTextScalePreset
 } from './text-scaling'
-import { getTotalScale, updateTransform } from './viewport-transform'
+import { updateTransform } from './viewport-transform'
 import { attachSurfaceWheelHandler } from './wheel-scroll'
 
 /** A surface that has already been wired, so a re-mount does not stack handlers. */

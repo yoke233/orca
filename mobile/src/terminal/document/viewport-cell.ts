@@ -1,6 +1,5 @@
 import type { TerminalDocumentScope } from './document-scope'
-import { getCellHeight } from './fit-scale'
-import { getCellWidth, getTotalScale } from './viewport-transform'
+import { getCellHeight, getCellWidth, getTotalScale } from './cell-metrics'
 
 export function viewportToCell(scope: TerminalDocumentScope, clientX: number, clientY: number) {
   if (!scope.term) {

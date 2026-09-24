@@ -1,6 +1,6 @@
 import type { TerminalDocumentScope } from './document-scope'
 import { notify } from './host-notify'
-import { cancelSelect } from './selection-range'
+import { cancelSelect } from './selection-actions'
 import { repositionOverlay } from './selection-overlay'
 
 export function startSelectionMenuButtons(scope: TerminalDocumentScope) {

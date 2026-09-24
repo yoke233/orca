@@ -13,7 +13,7 @@ import {
 } from './mouse-mode-decset-scan'
 import { captureInitialOscLinkTexts } from './osc-link-tap'
 import { attachTerminalQueryReplyBridge, resetTerminalDataReplyAuthority } from './query-reply'
-import { cancelSelect } from './selection-range'
+import { cancelSelect } from './selection-actions'
 import { resetEvictionCounter } from './selection-state-and-eviction'
 import { beginTerminalSurfaceSwap, commitTerminalSurfaceSwap } from './surface-swap'
 import { attachTermObservers } from './term-observers'
