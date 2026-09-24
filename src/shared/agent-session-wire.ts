@@ -20,6 +20,7 @@ import type {
   AgentJournalResetReason,
   AgentJournalResolution,
   AgentJournalSubmission,
+  AgentJournalThreadGoal,
   AgentJournalTurnOutcome
 } from './agent-session-journal-types'
 import {
@@ -212,11 +213,17 @@ export type AgentSessionStatusSummary = {
   latestPrompt: string
   /** Provider model in force for the next turn; absent until the host has read the options. */
   model?: string
-  /** The tool the running turn is inside. Absent unless `status` is 'working'. */
+  /** The tool the running turn is inside, else the last one it used. Absent unless `status`
+   *  is 'working'. */
   toolName?: string
   toolInput?: string
   /** Preview of the newest assistant prose, so a settled row says what the agent said. */
   lastAssistantMessage?: string
+  /** The provider's verdict on the newest settled root turn. Present only while `status` is
+   *  `idle`: a running or attention-blocked turn has no verdict yet, and a stale one must not
+   *  ride along. Absent means UNKNOWN, never success. Optional for mixed-version hosts; the
+   *  agent-status row publishes it as `mainAgent.outcome`. */
+  turnOutcome?: AgentJournalTurnOutcome
   /** Live provider-owned background tasks, so session lists can render
    *  subagent children without holding a journal reader open. Optional for
    *  mixed-version hosts. */
@@ -237,9 +244,12 @@ export type AgentSessionStatusEvent =
 /**
  * One root turn reaching a terminal outcome, derived by the EXECUTION HOST at journal commit.
  *
- * Deliberately not a field on `AgentSessionStatusSummary`: that summary carries no turn identity
- * and no outcome, it is re-broadcast on every status change, and adding an outcome would make
- * every status consumer a completion consumer. A completion is a rare edge, not a state.
+ * This is the EDGE, with turn identity; `AgentSessionStatusSummary.turnOutcome` is the STATE.
+ * The summary carries the verdict only while the session is idle, as a fact about the main agent's
+ * last turn that a status reader may act on (attention alerts, the `mainAgent.outcome` row field),
+ * and never a turn id: a reader that needs to know WHICH turn finished, or to react exactly once
+ * per finish, subscribes here. Re-broadcasting the summary on every status change therefore
+ * repeats a state, not a completion.
  *
  * `outcome` is A0's provider verdict and is never inferred — a turn the host only observed ending
  * carries no outcome and produces no event at all, because absent means UNKNOWN, not success.
@@ -378,11 +388,30 @@ export type AgentSessionCommandsResult = {
   commands?: AgentSessionSlashCommand[]
 }
 
+/** Longest objective a client may send; matches the provider's own limit. */
+export const AGENT_SESSION_THREAD_GOAL_OBJECTIVE_MAX_LENGTH = 4000
+
+/** A client's change to the thread goal. `set` replaces the objective and makes
+ *  it active, which the provider pursues without a separate turn. */
+export type AgentSessionThreadGoalChange =
+  | { kind: 'set'; objective: string }
+  | { kind: 'status'; status: 'active' | 'paused' }
+  | { kind: 'clear' }
+
+export type AgentSessionThreadGoalResult = {
+  change: AgentSessionThreadGoalChange['kind']
+}
+
 /** Provider-reported choices and effective next-turn values. Additive read-only
  *  surface so older hosts can reject it without changing structured v1 writes. */
 export type AgentSessionOptionsResult = {
   rewind?: AgentSessionRewindSupport
   conversationCommands?: readonly AgentSessionConversationCommand[]
+  /** Present only where this session can change its goal, so a host without
+   *  `agentSession.threadGoal` never offers the controls. `current` is the
+   *  latest goal the whole journal records, for a client whose loaded page
+   *  starts after it. */
+  threadGoal?: { current: AgentJournalThreadGoal | null }
   models: AgentSessionModelOption[]
   /** Session/account/transport support. Absent means unknown, never unsupported. */
   fastModeSupport?: AgentSessionFastModeSupport
