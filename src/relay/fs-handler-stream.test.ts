@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { FsHandler } from './fs-handler'
 import { RelayContext } from './context'
-import type { RelayDispatcher } from './dispatcher'
-import { MAX_CONCURRENT_STREAMS, STREAM_CHUNK_SIZE } from './protocol'
+import type { RelayDispatcher } from '../wsl-guest/dispatcher'
+import { MAX_CONCURRENT_STREAMS, STREAM_CHUNK_SIZE } from '../wsl-guest/protocol'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -490,6 +490,29 @@ describe('FsHandler readFileStream', () => {
     dispatcher.settleHeldControlFrames()
     await dispatcher.callRequest('fs.readFileStream', { filePath }, context)
     await waitFor(() => terminalFrames().length === MAX_CONCURRENT_STREAMS + 2)
+  })
+
+  it('holds file stream shutdown until an undelivered terminal frame settles', async () => {
+    const filePath = path.join(tmpDir, 'shutdown-terminal.png')
+    writeFileSync(filePath, Buffer.alloc(STREAM_CHUNK_SIZE, 0x42))
+    dispatcher.holdControlSettlements()
+    const context = { clientId: 4, isStale: () => false }
+    await dispatcher.callRequest('fs.readFileStream', { filePath }, context)
+    await waitFor(() => collectStream(dispatcher).end !== null)
+
+    let drained = false
+    const drain = handler.disposeFileStreams().then(() => {
+      drained = true
+    })
+    await flush(10)
+    expect(drained).toBe(false)
+    await expect(
+      dispatcher.callRequest('fs.readFileStream', { filePath }, context)
+    ).rejects.toThrow('relay_file_stream_shutdown_fenced')
+
+    dispatcher.settleHeldControlFrames()
+    await drain
+    expect(drained).toBe(true)
   })
 
   it('rejects the 17th concurrent stream with TooManyStreams', async () => {

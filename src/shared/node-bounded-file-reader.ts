@@ -1,5 +1,5 @@
-import { closeSync, fstatSync, openSync, readSync, type Stats } from 'node:fs'
-import { open, type FileHandle } from 'node:fs/promises'
+import { closeSync, constants, fstatSync, openSync, readSync, type Stats } from 'node:fs'
+import { open, stat, type FileHandle } from 'node:fs/promises'
 
 const MIN_GROWTH_BYTES = 64 * 1024
 
@@ -22,6 +22,8 @@ export type BoundedNodeFileRead = {
 
 export type OpenNodeFile = typeof open
 
+type NodeFileReadOptions = { regularFileOnly?: boolean; signal?: AbortSignal }
+
 function validateSize(size: number, maxBytes: number): void {
   if (!Number.isSafeInteger(size) || size < 0) {
     throw new Error('File has an invalid byte size')
@@ -34,11 +36,21 @@ function validateSize(size: number, maxBytes: number): void {
 export async function readNodeFileWithinLimit(
   filePath: string,
   maxBytes: number,
+  options: NodeFileReadOptions = {},
   openFile: OpenNodeFile = open
 ): Promise<BoundedNodeFileRead> {
-  const handle = await openFile(filePath, 'r')
+  options.signal?.throwIfAborted()
+  if (options.regularFileOnly && !(await stat(filePath)).isFile()) {
+    throw new Error('Expected a regular file')
+  }
+  options.signal?.throwIfAborted()
+  // Nonblocking open fences replacement with a FIFO after the path check.
+  const flags = options.regularFileOnly
+    ? constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NONBLOCK)
+    : 'r'
+  const handle = await openFile(filePath, flags)
   try {
-    return await readNodeFileHandleWithinLimit(handle, maxBytes)
+    return await readNodeFileHandleWithinLimit(handle, maxBytes, options)
   } finally {
     await handle.close()
   }
@@ -46,20 +58,28 @@ export async function readNodeFileWithinLimit(
 
 export async function readNodeFileHandleWithinLimit(
   handle: FileHandle,
-  maxBytes: number
+  maxBytes: number,
+  options: NodeFileReadOptions = {}
 ): Promise<BoundedNodeFileRead> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
     throw new RangeError('File read limit must be a non-negative safe integer')
   }
 
+  options.signal?.throwIfAborted()
   const stats = await handle.stat()
+  options.signal?.throwIfAborted()
+  if (options.regularFileOnly && !stats.isFile()) {
+    throw new Error('Expected a regular file')
+  }
   validateSize(stats.size, maxBytes)
 
   let buffer = Buffer.allocUnsafe(stats.size)
   let offset = 0
   while (true) {
+    options.signal?.throwIfAborted()
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset)
+      options.signal?.throwIfAborted()
       if (bytesRead === 0) {
         return { buffer: buffer.subarray(0, offset), stats }
       }
@@ -68,6 +88,7 @@ export async function readNodeFileHandleWithinLimit(
 
     const probe = Buffer.allocUnsafe(1)
     const { bytesRead } = await handle.read(probe, 0, 1, offset)
+    options.signal?.throwIfAborted()
     if (bytesRead === 0) {
       return { buffer: buffer.subarray(0, offset), stats }
     }

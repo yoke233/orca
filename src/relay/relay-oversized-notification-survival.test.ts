@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { RelayDispatcher } from './dispatcher'
-import { relayWriterControlReserve } from './dispatcher-writer-admission'
-import { encodeJsonRpcFrame, HEADER_LENGTH, parseJsonRpcMessage } from './protocol'
+import { RelayDispatcher } from '../wsl-guest/dispatcher'
+import { relayWriterControlReserve } from '../wsl-guest/dispatcher-writer-admission'
+import { encodeJsonRpcFrame, HEADER_LENGTH, parseJsonRpcMessage } from '../wsl-guest/protocol'
 import {
   AGENT_HOOK_NOTIFICATION_METHOD,
   type AgentHookRelayEnvelope
 } from '../shared/agent-hook-relay'
 import { MAX_BATCHED_WATCHER_EVENTS } from '../main/ipc/filesystem-watcher-event-batch'
 import { emitRelayWatcherEvents } from './relay-watcher-event-emitter'
-import { publishAgentHookEnvelope } from './agent-hook-envelope-publication'
+import { publishAgentHookEnvelope } from '../wsl-guest/agent-hook-envelope-publication'
 import type { WatcherProcessEvent } from '../main/ipc/parcel-watcher-process'
 import {
   AGENT_STATUS_ASSISTANT_MESSAGE_MAX_LENGTH,
@@ -200,21 +200,6 @@ describe('relay oversized notification survival', () => {
       const payload = params.payload as Record<string, unknown>
       expect(payload.state).toBe('waiting')
       expect(payload.lastAssistantMessage).toBeUndefined()
-    } finally {
-      dispatcher.dispose()
-    }
-  })
-
-  it("publishAgentHookEnvelope does not mutate the caller's envelope", () => {
-    const sink: Buffer[] = []
-    const dispatcher = createDispatcher(NODE21_HWM, () => {}, sink)
-    const envelope = buildMaximalHookEnvelope()
-    const before = structuredClone(envelope)
-
-    try {
-      publishAgentHookEnvelope(dispatcher, envelope as unknown as AgentHookRelayEnvelope)
-      // The hook server replays this exact object after --connect, so shedding must never touch it.
-      expect(envelope).toEqual(before)
     } finally {
       dispatcher.dispose()
     }

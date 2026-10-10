@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { WatcherProcessSubscription } from '../main/ipc/parcel-watcher-process-subscription'
 import type { PromiseSettlementWaiters } from '../shared/promise-settlement-waiters'
-import type { RelayDispatcher, RequestContext } from './dispatcher'
+import type { RelayDispatcher, RequestContext } from '../wsl-guest/dispatcher'
 import { RelayFilesystemWatchRegistry } from './relay-filesystem-watch-registry'
 
 class PendingSetupPool {
   readonly installed: { unsubscribe: () => Promise<void> }[] = []
   readonly dispose = vi.fn()
   readonly forgetRoot = vi.fn()
+  readonly disposeAndWait = vi.fn(async () => {})
+  readonly reopen = vi.fn()
 
   async subscribe(): Promise<WatcherProcessSubscription> {
     const subscription = { unsubscribe: vi.fn(async () => undefined) }

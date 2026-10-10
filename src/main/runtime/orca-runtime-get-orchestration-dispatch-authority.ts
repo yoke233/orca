@@ -13,15 +13,26 @@ import { RECENT_PTY_OUTPUT_LIMIT, RecentPtyOutputBuffer } from './recent-pty-out
 import { appendRecentPtyPathCandidates } from './terminal-output-path-candidates'
 import type { ProjectExecutionRuntimeResolution } from '../../shared/project-execution-runtime'
 import { resolveLocalProjectRuntimeForWorktreeId } from '../local-project-runtime-resolution'
+import {
+  HOST_DEFAULT_AGENT_DETECTION,
+  resolveWorkspaceAgentDetectionHost,
+  type AgentDetectionHost
+} from '../preflight/workspace-agent-detection'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
+import { parseWorkspaceKey } from '../../shared/workspace-scope'
+import type { ResolvedWorktree } from './runtime-worktree-path-identity'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import {
+  localOrchestrationCliCommand,
   resolveTerminalOrchestrationCliCommand,
+  runtimeOrchestrationCliCommand,
   type OrchestrationCliCommand
 } from './orchestration/cli-command'
-import { getAppEnvironment } from '../../shared/app-environment'
 import type { FleetAgentStatusEvidence } from '../../shared/orchestration-fleet-agent-status-evidence'
 import { readOrchestrationFleetAgentStatusSnapshot } from './orchestration-fleet-agent-status-snapshot'
 import { resolveStructuredWorkerAuthority } from './structured-worker-authority'
+import { isStructuredWorkerHandle } from './structured-worker-identity'
+import { parseOrcaSessionAddress } from '../../shared/orca-session-address'
 import { matchesProcessIncarnation } from './orchestration/worker-terminal-process-liveness'
 
 export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntimeWithVerifyOrchestrationCompatibilityCaller {
@@ -245,11 +256,50 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
       : undefined
   }
 
+  // Why the host's own worktree record: it carries the owning host and the real path, where the
+  // client's id alone could pick the wrong row for a repo id shared across hosts.
+  async resolveAgentDetectionHost(
+    worktreeId: string | null | undefined
+  ): Promise<AgentDetectionHost> {
+    if (!this.store || !worktreeId || worktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
+      return HOST_DEFAULT_AGENT_DETECTION
+    }
+    const store = this.requireStore()
+    const scope = parseWorkspaceKey(worktreeId)
+    if (scope?.type === 'folder') {
+      return resolveWorkspaceAgentDetectionHost(store, {
+        kind: 'folder',
+        folderWorkspaceId: scope.folderWorkspaceId
+      })
+    }
+    let worktree: ResolvedWorktree
+    try {
+      worktree = await this.resolveWorktreeSelector(`id:${worktreeId}`)
+    } catch (error) {
+      // Only an unknown workspace keeps the answer older clients always got; an ambiguous one
+      // has no single host, and probing this one would list another machine's agents.
+      if (error instanceof Error && error.message === 'selector_not_found') {
+        return HOST_DEFAULT_AGENT_DETECTION
+      }
+      throw error
+    }
+    return resolveWorkspaceAgentDetectionHost(store, {
+      kind: 'worktree',
+      repoId: worktree.repoId,
+      path: worktree.path,
+      hostId: worktree.hostId
+    })
+  }
+
   getOrchestrationFleetAgentStatusSnapshot(): readonly FleetAgentStatusEvidence[] {
     return readOrchestrationFleetAgentStatusSnapshot(this)
   }
 
   getTerminalOrchestrationCliCommand(handle: string): OrchestrationCliCommand {
+    // A structured session runs in this process: it is told what the structured mail lane types.
+    if (isStructuredWorkerHandle(handle) || parseOrcaSessionAddress(handle)) {
+      return localOrchestrationCliCommand()
+    }
     let pty: RuntimePtyWorktreeRecord | null = null
     try {
       const ptyId = this.resolveLeafForHandle(handle)?.ptyId
@@ -264,8 +314,7 @@ export class OrcaRuntimeWithGetOrchestrationDispatchAuthority extends OrcaRuntim
       connectionId: pty.connectionId,
       isWsl: pty.isWsl,
       worktreeId: pty.worktreeId,
-      // Dev builds run the CLI as `orca-dev`; a packaged app must not advertise it.
-      runtimeCliCommand: getAppEnvironment().isPackaged() ? undefined : 'orca-dev',
+      runtimeCliCommand: runtimeOrchestrationCliCommand(),
       projectRuntime: this.store
         ? resolveLocalProjectRuntimeForWorktreeId(this.requireStore(), pty.worktreeId)
         : undefined

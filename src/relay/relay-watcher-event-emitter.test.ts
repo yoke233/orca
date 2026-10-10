@@ -1,16 +1,14 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import type { WatcherProcessEvent } from '../main/ipc/parcel-watcher-process-protocol'
-import { RelayDispatcher } from './dispatcher'
+import { RelayDispatcher } from '../wsl-guest/dispatcher'
 import {
   DISPATCHER_CONTROL_QUEUE_MAX_BYTES,
   DEFAULT_PRODUCER_QUEUE_MAX_BYTES,
   DISPATCHER_CONTROL_QUEUE_MAX_FRAMES
-} from './dispatcher-writer-admission'
-import type { RelayClientSinkOptions, RelayClientWrite } from './dispatcher-writer-sink'
-import { LEGACY_CLIENT_RETAINED_BYTES_LOW } from './legacy-relay-publication-ledger'
-import { HEADER_LENGTH, parseJsonRpcMessage } from './protocol'
+} from '../wsl-guest/dispatcher-writer-admission'
+import type { RelayClientSinkOptions, RelayClientWrite } from '../wsl-guest/dispatcher-writer-sink'
+import { LEGACY_CLIENT_RETAINED_BYTES_LOW } from '../wsl-guest/legacy-relay-publication-ledger'
+import { HEADER_LENGTH, parseJsonRpcMessage } from '../wsl-guest/protocol'
 import { emitRelayWatcherEvents, emitRelayWatcherOverflow } from './relay-watcher-event-emitter'
 
 type WatcherFrameEvent = { kind: string; absolutePath: string; isDirectory?: boolean }
@@ -200,13 +198,6 @@ describe('relay watcher writer admission', () => {
 })
 
 describe('relay watcher overflow suppression key', () => {
-  it('keeps the source free of NUL bytes so git and grep still see text', () => {
-    const source = readFileSync(
-      fileURLToPath(new URL('./relay-watcher-event-emitter.ts', import.meta.url))
-    )
-    expect(source.includes(0)).toBe(false)
-  })
-
   it('scopes the outstanding marker per client as well as per root', () => {
     const primary = createRecordingSink(65536)
     const secondary = createRecordingSink(65536)

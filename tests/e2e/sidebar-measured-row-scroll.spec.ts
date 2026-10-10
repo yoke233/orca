@@ -4,7 +4,7 @@ import path from 'node:path'
 import type { Page } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
-import { runProcess } from '../../src/shared/child-process/run-process'
+import { runProcess } from '@orca/process-host'
 
 test.use({ seedTestRepo: false })
 
@@ -71,6 +71,8 @@ test('keeps a collapsed group visible when an idle card below it grows', async (
   orcaPage,
   registerPostElectronShutdownCleanup
 }, testInfo) => {
+  // Why: the fixture's collapse slides rows in from their old position; a hidden window can freeze that mid-flight baseline.
+  await orcaPage.emulateMedia({ reducedMotion: 'reduce' })
   await waitForSessionReady(orcaPage)
   await orcaPage.setViewportSize({ width: 1200, height: 900 })
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'orca-sidebar-measured-row-')))

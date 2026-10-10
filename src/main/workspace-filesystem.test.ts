@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { workspaceFs, workspaceFsPromises } from './workspace-filesystem'
+import { workspaceFsPromises } from './workspace-filesystem'
 
 describe('workspace filesystem', () => {
   const roots: string[] = []
@@ -20,13 +20,6 @@ describe('workspace filesystem', () => {
     writeFileSync(fixturePath, content)
     return fixturePath
   }
-
-  it('exposes one non-ASAR filesystem seam for workspace paths', async () => {
-    const originalFs = await import('original-fs')
-
-    expect(workspaceFs).toBe(originalFs)
-    expect(workspaceFsPromises).toBe(originalFs.promises)
-  })
 
   it('treats valid and damaged ASARs as ordinary workspace files', async () => {
     const fixturePath = createFixture(

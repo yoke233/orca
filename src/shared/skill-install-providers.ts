@@ -16,6 +16,7 @@ export type SkillInstallProviderId =
   | 'grok'
   | 'aug'
   | 'muse'
+  | 'zcode'
 
 export type SkillInstallProviderDefinition = {
   id: SkillInstallProviderId
@@ -88,6 +89,14 @@ export const SKILL_INSTALL_PROVIDERS: readonly SkillInstallProviderDefinition[] 
     displayName: 'Muse',
     globalSegments: null,
     workspaceSegments: null
+  },
+  // Why: ZCode loads user skills from `~/.zcode/skills`; project skills come from the
+  // canonical `.agents/skills` root the shared repo source already covers.
+  {
+    id: 'zcode',
+    displayName: 'ZCode',
+    globalSegments: ['.zcode', 'skills'],
+    workspaceSegments: null
   }
 ]
 
@@ -95,20 +104,6 @@ const PROVIDERS_BY_ID = new Map(SKILL_INSTALL_PROVIDERS.map((provider) => [provi
 
 export function isSkillInstallProviderId(value: string): value is SkillInstallProviderId {
   return PROVIDERS_BY_ID.has(value as SkillInstallProviderId)
-}
-
-export function skillInstallProvider(
-  id: SkillInstallProviderId
-): SkillInstallProviderDefinition | undefined {
-  return PROVIDERS_BY_ID.get(id)
-}
-
-/** Detected agents Orca can actually place skills for, in registry order. */
-export function installableSkillProviders(
-  detectedProviders: readonly string[]
-): SkillInstallProviderDefinition[] {
-  const detected = new Set(detectedProviders)
-  return SKILL_INSTALL_PROVIDERS.filter((provider) => detected.has(provider.id))
 }
 
 /**

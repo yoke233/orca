@@ -178,10 +178,12 @@ describe('FloatingTerminalWindowControls default-agent launch', () => {
     clickLaunch()
 
     expect(mocks.launchAgentInNewTab).toHaveBeenCalledExactlyOnceWith({
+      requestId: expect.any(String),
       agent: 'claude',
       worktreeId: FLOATING_TERMINAL_WORKTREE_ID,
       launchSource: 'shortcut',
-      activate: false
+      activate: false,
+      freshNewTab: true
     })
     // Why: the whole point of the migration. The shared launcher owns the startup plan and the
     // tab it lands in, so this button must not reach past it into the tab store.
@@ -214,11 +216,9 @@ describe('FloatingTerminalWindowControls default-agent launch', () => {
     expect(mocks.activateTab).not.toHaveBeenCalled()
   })
 
-  // Why: a floating window has nowhere to keep a structured session, so the launch must resolve a
-  // terminal. Pinned against the shared resolver the launcher routes on, not a restatement here.
-  it('keeps the floating workspace off the structured route', () => {
-    // `claude` is a structured-session provider on a local host, so `floating-workspace` is the
-    // only blocker that can produce this result — any other answer means the kind stopped deciding.
+  // Why: workspace kind no longer refuses the structured route — the floating session files under
+  // its resolved directory like any workspace. Only capability negotiation can still say no here.
+  it('routes the floating workspace by capability, not by workspace kind', () => {
     expect(
       resolveStructuredNativeChatSupport({
         agent: 'claude',
@@ -226,6 +226,6 @@ describe('FloatingTerminalWindowControls default-agent launch', () => {
         hostCapabilities: null,
         workspaceKind: 'floating'
       })
-    ).toEqual({ supported: false, blocker: 'floating-workspace' })
+    ).toEqual({ supported: false, blocker: 'runtime-capability-unknown' })
   })
 })

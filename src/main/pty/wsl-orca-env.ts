@@ -10,6 +10,11 @@ import {
 } from '../../shared/setup-agent-sequencing'
 import { getShellReadyWrapperRoot } from '../providers/local-pty-shell-ready-wrapper-root'
 import { ORCA_IMAGE_PROTOCOL_ENV } from '../../shared/terminal-image-protocol'
+import {
+  RUNTIME_SOURCE_ID_ENV,
+  RUNTIME_SOURCE_INCARNATION_ENV,
+  RUNTIME_SOURCE_PROFILE_PATH_ENV
+} from '../../shared/runtime-source-env'
 
 const WSLENV_ENTRY_SEPARATOR = ':'
 
@@ -79,7 +84,10 @@ export function addOrcaWslInteropEnv(env: Record<string, string>): void {
     // and it cannot derive the hash segment from ORCA_USER_DATA_PATH alone.
     'ORCA_SHELL_READY_ROOT/p',
     'ORCA_CLI_COMMAND/u',
+    // Why /p: the managed CLI launcher lives in the host's userData tree.
+    'ORCA_WSL_CLI_DIR/p',
     'ORCA_CODEX_LAUNCH_PREFLIGHT/p',
+    'ORCA_CODEX_ISOLATE/u',
     'ORCA_PANE_KEY/u',
     'ORCA_TAB_ID/u',
     'ORCA_WORKTREE_ID/u',
@@ -92,6 +100,10 @@ export function addOrcaWslInteropEnv(env: Record<string, string>): void {
     'ORCA_ORCHESTRATION_COMPATIBILITY_HOST_KIND/u',
     'ORCA_ORCHESTRATION_COMPATIBILITY_HOST_ID/u',
     'ORCA_ORCHESTRATION_COMPATIBILITY_HOST_INCARNATION/u',
+    `${RUNTIME_SOURCE_ID_ENV}/u`,
+    `${RUNTIME_SOURCE_INCARNATION_ENV}/u`,
+    // Why /u: compared with the Windows CLI's own userData path, never read as a guest path.
+    `${RUNTIME_SOURCE_PROFILE_PATH_ENV}/u`,
     'ORCA_AGENT_HOOK_PORT/u',
     'ORCA_AGENT_HOOK_TOKEN/u',
     'ORCA_AGENT_HOOK_ENV/u',

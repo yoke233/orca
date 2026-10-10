@@ -23,13 +23,18 @@ export async function preScanForSymlinks(dirPath: string): Promise<boolean> {
   return false
 }
 
-/**
- * Recursively copy a directory and all its contents. Uses copyFile for
- * individual files to leverage native OS copy primitives instead of
- * buffering entire files into memory.
- */
 export async function recursiveCopyDir(srcDir: string, destDir: string): Promise<void> {
+  // A failed exclusive mkdir gives us no ownership to roll back.
   await workspaceFsPromises.mkdir(destDir, { recursive: false })
+  try {
+    await copyDirectoryContents(srcDir, destDir)
+  } catch (error) {
+    await workspaceFsPromises.rm(destDir, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
+}
+
+async function copyDirectoryContents(srcDir: string, destDir: string): Promise<void> {
   const entries = await workspaceFsPromises.readdir(srcDir, { withFileTypes: true })
   for (const entry of entries) {
     const srcPath = join(srcDir, entry.name)
@@ -39,7 +44,8 @@ export async function recursiveCopyDir(srcDir: string, destDir: string): Promise
       throw new Error(`Symlink not allowed in '${entry.name}'`)
     }
     if (statResult.isDirectory()) {
-      await recursiveCopyDir(srcPath, dstPath)
+      await workspaceFsPromises.mkdir(dstPath, { recursive: false })
+      await copyDirectoryContents(srcPath, dstPath)
       continue
     }
     if (!statResult.isFile()) {

@@ -14,7 +14,12 @@ async function ownerMidSecondTurn(persisted: unknown[]) {
   const claude = fakeClaude()
   const adapter = adapterFor(
     claude,
-    { resumed: true, resumeLeafUuid: 'a3', options: { resume: PROVIDER_SESSION_ID } },
+    {
+      resumesTranscript: true,
+      continuesChain: true,
+      resumeLeafUuid: 'a3',
+      options: { resume: PROVIDER_SESSION_ID }
+    },
     [],
     persisted
   )
@@ -68,7 +73,12 @@ describe('Claude resume point is the last completed turn on every exit path', ()
     const claude = fakeClaude()
     const adapter = adapterFor(
       claude,
-      { resumed: true, resumeLeafUuid: 'a3', options: { resume: PROVIDER_SESSION_ID } },
+      {
+        resumesTranscript: true,
+        continuesChain: true,
+        resumeLeafUuid: 'a3',
+        options: { resume: PROVIDER_SESSION_ID }
+      },
       [],
       persisted
     )
@@ -78,7 +88,7 @@ describe('Claude resume point is the last completed turn on every exit path', ()
       spawnToken: 'spawn-7',
       events: recordingJournalSink()
     })
-    expect(acquisition.link.handle).toMatchObject({ leafUuid: 'a3' })
+    expect(acquisition.link.handle).toMatchObject({ resumeCursor: 'a3' })
     await expect(adapter.closeSession('session-1')).resolves.toBe(true)
     expect(persisted).toEqual([expect.objectContaining({ leafUuid: 'a3' })])
   })
@@ -101,7 +111,12 @@ describe('Claude resume point is the last completed turn on every exit path', ()
     const claude = fakeClaude()
     const adapter = adapterFor(
       claude,
-      { resumed: true, resumeLeafUuid: 'a3', options: { resume: PROVIDER_SESSION_ID } },
+      {
+        resumesTranscript: true,
+        continuesChain: true,
+        resumeLeafUuid: 'a3',
+        options: { resume: PROVIDER_SESSION_ID }
+      },
       events,
       [],
       undefined,

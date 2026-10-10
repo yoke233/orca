@@ -3,17 +3,63 @@
 
 import type {
   AgentJournalItemBody,
-  AgentJournalItemIdentity
+  AgentJournalItemIdentity,
+  AgentJournalTurnScope
 } from '../../shared/agent-session-journal-types'
 import { subagentGroupFallbackText } from '../../shared/native-chat-subagent-summary'
 import type { NativeChatSubagentEntry } from '../../shared/native-chat-types'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import type { RosterGroup } from './claude-subagent-roster-state'
 
+type GroupRowAttempts = (entryId: string) => number
+
+/** A group row an earlier run journaled: its children and the turn it was written beside. */
+export type JournaledClaudeSubagentGroup = {
+  entries: readonly NativeChatSubagentEntry[]
+  turnScope: AgentJournalTurnScope
+}
+
 /** Durable journal identity for the group's row — stable across revisions and
  *  across a restart, so replay finds the same row instead of appending a new one. */
 export function claudeSubagentGroupIdentity(groupId: string): AgentJournalItemIdentity {
   return { provider: 'orca', clientMessageId: `claude-subagents:${groupId}` }
+}
+
+/**
+ * A group row an earlier provider run journaled, as this run's roster state.
+ *
+ * Inheriting writes nothing: the row is revised only when this run's own events
+ * change the group, and then it keeps every child the earlier run listed. Each
+ * child outlived the run that spawned it, so none is tied to this run's turns.
+ */
+export function inheritedClaudeSubagentGroup(
+  groupId: string,
+  { entries, turnScope }: JournaledClaudeSubagentGroup,
+  attemptOf: GroupRowAttempts
+): RosterGroup {
+  const group: RosterGroup = {
+    groupId,
+    identity: claudeSubagentGroupIdentity(groupId),
+    // The row keeps the turn it was created beside; a later run's writes never move it.
+    turnScope,
+    entries: new Map(),
+    admittedEntries: entries.length,
+    claimedLabels: new Set(),
+    lastSerialized: JSON.stringify(claudeSubagentGroupBody(groupId, entries))
+  }
+  for (const entry of entries) {
+    group.claimedLabels.add(entry.label)
+    group.entries.set(entry.id, {
+      entry: { ...entry },
+      backgrounded: true,
+      toolUseId: null,
+      invocationIds: new Set(),
+      labelBase: entry.label,
+      attempt: attemptOf(entry.id),
+      invokedInEarlierRun: true
+    })
+  }
+  return group
 }
 
 /** The roster row: the structured block plus the plain sentence an older client
@@ -46,15 +92,29 @@ export function writeClaudeSubagentGroupRow(
   group: RosterGroup
 ): void {
   const agents = [...group.entries.values()].map((tracked) => tracked.entry)
-  const options = { coalescingKey: `claude-subagents:${group.groupId}` }
   if (agents.length === 0) {
-    // The row's last child turned out not to be a subagent. An empty roster is
-    // not a roster of nothing, so the row goes rather than reading "Ran 0".
-    if (group.lastSerialized !== null) {
+    const serialized = JSON.stringify(claudeSubagentGroupBody(group.groupId, []))
+    if (serialized === group.lastSerialized) {
+      return
+    }
+    // Reclassification removes the row; refused tombstones remain retryable.
+    const admission = sink.tryAppendTombstone?.(group.identity)
+    if (admission && !admission.accepted) {
       group.lastSerialized = null
-      sink.appendTombstone(group.identity, options)
+      return
+    }
+    if (!admission) {
+      sink.appendTombstone(group.identity)
+    }
+    const publication = sink.tryPublish?.()
+    if (publication && !publication.accepted) {
+      group.lastSerialized = null
+      return
+    }
+    if (!publication) {
       sink.publish()
     }
+    group.lastSerialized = serialized
     return
   }
   const body = claudeSubagentGroupBody(group.groupId, agents)
@@ -63,9 +123,22 @@ export function writeClaudeSubagentGroupRow(
     // Nothing changed — a duplicate delivery must not burn a revision.
     return
   }
+  const options = { turnScope: group.turnScope }
+  const admission = sink.tryAppendItem?.(group.identity, body, options)
+  if (admission && !admission.accepted) {
+    group.lastSerialized = null
+    return
+  }
+  if (!admission) {
+    sink.appendItem(group.identity, body, options)
+  }
+  const publication = sink.tryPublish?.()
+  if (publication && !publication.accepted) {
+    group.lastSerialized = null
+    return
+  }
+  if (!publication) {
+    sink.publish()
+  }
   group.lastSerialized = serialized
-  sink.appendItem(group.identity, body, options)
-  // Publish keeps the sink's own coalescing slot: sharing the row's key makes
-  // each queued publish evict the append it was meant to flush.
-  sink.publish()
 }

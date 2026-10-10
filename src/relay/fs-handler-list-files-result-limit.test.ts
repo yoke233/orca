@@ -21,7 +21,7 @@ vi.mock('@parcel/watcher', () => ({ subscribe: vi.fn() }))
 
 import { FsHandler } from './fs-handler'
 import { RelayContext } from './context'
-import type { RelayDispatcher } from './dispatcher'
+import type { RelayDispatcher } from '../wsl-guest/dispatcher'
 import { QUICK_OPEN_LISTING_MAX_RESULTS } from '../shared/quick-open-listing-limits'
 
 type ListFilesHandler = (
@@ -44,6 +44,8 @@ function createHandler(): { listFiles: ListFilesHandler; dispose: () => void } {
   const handler = new FsHandler(dispatcher, new RelayContext(), {
     dispose: vi.fn(),
     forgetRoot: vi.fn(),
+    disposeAndWait: vi.fn(async () => {}),
+    reopen: vi.fn(),
     subscribe: vi.fn()
   })
   return { listFiles: requestHandlers.get('fs.listFiles')!, dispose: () => handler.dispose() }

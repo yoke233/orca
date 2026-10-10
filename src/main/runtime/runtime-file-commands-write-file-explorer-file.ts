@@ -2,14 +2,7 @@
 import { RuntimeFileCommandsWithReadFileExplorerPreview } from './runtime-file-commands-read-file-explorer-preview'
 import { assertRuntimeFileMutationExpectation } from './runtime-file-commands-mobile-file-list-limit'
 import { requireRuntimeFileProvider } from './runtime-file-command-target'
-import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
-import { isENOENT } from '../ipc/filesystem-path-containment'
-import { dirname } from 'node:path'
-import {
-  assertRuntimePathDoesNotExist,
-  rethrowRuntimeFileCreateError
-} from './runtime-file-commands-terminal-file-paths'
-import { workspaceFsPromises } from '../workspace-filesystem'
+
 
 export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCommandsWithReadFileExplorerPreview {
   async writeFileExplorerFile(
@@ -27,24 +20,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    if (provider) {
-      await provider.writeFile(target.path, content)
-      return { ok: true }
-    }
-
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    try {
-      const fileStats = await workspaceFsPromises.lstat(filePath)
-      if (fileStats.isDirectory()) {
-        throw new Error('Cannot write to a directory')
-      }
-    } catch (error) {
-      if (!isENOENT(error)) {
-        throw error
-      }
-    }
-    await workspaceFsPromises.writeFile(filePath, content, 'utf-8')
+    await requireRuntimeFileProvider(target, this.host).writeFile(target.path, content)
     return { ok: true }
   }
 
@@ -63,16 +39,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    const content = Buffer.from(contentBase64, 'base64')
-    if (provider) {
-      await provider.writeFileBase64(target.path, contentBase64)
-      return { ok: true }
-    }
-
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
-    await workspaceFsPromises.writeFile(filePath, content, { flag: 'wx' })
+    await requireRuntimeFileProvider(target, this.host).writeFileBase64(target.path, contentBase64)
     return { ok: true }
   }
 
@@ -92,16 +59,11 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    const content = Buffer.from(contentBase64, 'base64')
-    if (provider) {
-      await provider.writeFileBase64Chunk(target.path, contentBase64, append)
-      return { ok: true }
-    }
-
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
-    await workspaceFsPromises.writeFile(filePath, content, { flag: append ? 'a' : 'wx' })
+    await requireRuntimeFileProvider(target, this.host).writeFileBase64Chunk(
+      target.path,
+      contentBase64,
+      append
+    )
     return { ok: true }
   }
 
@@ -119,19 +81,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    if (provider) {
-      await provider.createFile(target.path)
-      return { ok: true }
-    }
-
-    const filePath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await workspaceFsPromises.mkdir(dirname(filePath), { recursive: true })
-    try {
-      await workspaceFsPromises.writeFile(filePath, '', { encoding: 'utf-8', flag: 'wx' })
-    } catch (error) {
-      rethrowRuntimeFileCreateError(error, filePath)
-    }
+    await requireRuntimeFileProvider(target, this.host).createFile(target.path)
     return { ok: true }
   }
 
@@ -149,15 +99,7 @@ export class RuntimeFileCommandsWithWriteFileExplorerFile extends RuntimeFileCom
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    if (provider) {
-      await provider.createDir(target.path)
-      return { ok: true }
-    }
-
-    const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await assertRuntimePathDoesNotExist(dirPath)
-    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
+    await requireRuntimeFileProvider(target, this.host).createDir(target.path)
     return { ok: true }
   }
 }

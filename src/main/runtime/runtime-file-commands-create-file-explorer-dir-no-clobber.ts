@@ -1,11 +1,14 @@
 // @ts-nocheck -- mechanically split class members.
 import { RuntimeFileCommandsWithWriteFileExplorerFile } from './runtime-file-commands-write-file-explorer-file'
 import { assertRuntimeFileMutationExpectation } from './runtime-file-commands-mobile-file-list-limit'
-import { requireRuntimeFileProvider } from './runtime-file-command-target'
+import {
+  requireRuntimeFileProvider,
+  requireSshRuntimeFileProvider,
+  runtimeFileRouteForTarget
+} from './runtime-file-command-target'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import { constants } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { renameLocalPathSerializedByDestination } from '../destination-serialized-local-rename'
 import { workspaceFsPromises } from '../workspace-filesystem'
 
 export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends RuntimeFileCommandsWithWriteFileExplorerFile {
@@ -23,14 +26,7 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    if (provider) {
-      await provider.createDirNoClobber(target.path)
-      return { ok: true }
-    }
-
-    const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
-    await workspaceFsPromises.mkdir(dirPath, { recursive: false })
+    await requireRuntimeFileProvider(target, this.host).createDirNoClobber(target.path)
     return { ok: true }
   }
 
@@ -52,8 +48,10 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(tempTarget)
-    if (provider) {
+    const route = runtimeFileRouteForTarget(tempTarget)
+    // Why: the local arm commits through the resolved (not symlink-preserving) temp and final paths.
+    if (route.kind === 'ssh') {
+      const provider = requireSshRuntimeFileProvider(route)
       await provider.copy(tempTarget.path, finalTarget.path)
       await provider.deletePath(tempTarget.path, false).catch(() => {})
       return { ok: true }
@@ -86,16 +84,10 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(oldTarget)
-    if (provider) {
-      await provider.renameNoClobber(oldTarget.path, newTarget.path)
-      return { ok: true }
-    }
-
-    const store = this.host.requireStore()
-    const oldPath = await resolveAuthorizedPath(oldTarget.path, store, { preserveSymlink: true })
-    const newPath = await resolveAuthorizedPath(newTarget.path, store, { preserveSymlink: true })
-    await renameLocalPathSerializedByDestination(oldPath, newPath)
+    await requireRuntimeFileProvider(oldTarget, this.host).renameNoClobber(
+      oldTarget.path,
+      newTarget.path
+    )
     return { ok: true }
   }
 
@@ -117,22 +109,10 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(sourceTarget)
-    if (provider) {
-      await provider.copy(sourceTarget.path, destinationTarget.path)
-      return { ok: true }
-    }
-
-    const store = this.host.requireStore()
-    const sourcePath = await resolveAuthorizedPath(sourceTarget.path, store, {
-      preserveSymlink: true
-    })
-    const destinationPath = await resolveAuthorizedPath(destinationTarget.path, store, {
-      preserveSymlink: true
-    })
-    await workspaceFsPromises.mkdir(dirname(destinationPath), { recursive: true })
-    // Why: COPYFILE_EXCL preserves the no-clobber invariant of the local shell copy IPC (caller already deconflicts names).
-    await workspaceFsPromises.copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL)
+    await requireRuntimeFileProvider(sourceTarget, this.host).copy(
+      sourceTarget.path,
+      destinationTarget.path
+    )
     return { ok: true }
   }
 
@@ -151,17 +131,8 @@ export class RuntimeFileCommandsWithCreateFileExplorerDirNoClobber extends Runti
       expectedSshTargetId,
       expectedSshConnectionGeneration
     )
-    const provider = requireRuntimeFileProvider(target)
-    if (provider) {
-      await provider.deletePath(target.path, recursive)
-      return { ok: true }
-    }
-
-    const targetPath = await resolveAuthorizedPath(target.path, this.host.requireStore(), {
-      preserveSymlink: true
-    })
     // Why: a non-local runtime has no client Trash; this delete is permanent, so the renderer confirms before calling.
-    await workspaceFsPromises.rm(targetPath, { recursive: recursive === true, force: true })
+    await requireRuntimeFileProvider(target, this.host).deletePath(target.path, recursive)
     return { ok: true }
   }
 }

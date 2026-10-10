@@ -1,5 +1,8 @@
 import { mainAgentStatusEqual } from '../../../shared/main-agent-status'
-import { claudeTeammateIdMatchesName } from '../../../shared/claude-subagent-roster'
+import {
+  claudeTeammateIdMatchesName,
+  isClaudeChildTurnEndEvent
+} from '../../../shared/claude-subagent-roster'
 import { isAskUserQuestionTool } from '../../../shared/agent-question-answered-intent'
 import type { AgentHookEventPayload } from '../../../shared/agent-hook-listener/listener-event'
 import type { EnrichedAgentHookEventPayload } from './server-types'
@@ -33,7 +36,13 @@ export function withHeldChildWaitMainAgent(
   }
   const runningNonAgentTask = pairedClaudeNonAgentWork(previous, next)
   const mainAgentChanged = !mainAgentStatusEqual(previous.payload.mainAgent, mainAgent)
-  if (!mainAgentChanged && runningNonAgentTask === previous.claudeRunningNonAgentTask) {
+  const pendingWakeup = next.payload.claudeTaskWakeupPending
+  const wakeupChanged = pendingWakeup !== previous.payload.claudeTaskWakeupPending
+  if (
+    !mainAgentChanged &&
+    !wakeupChanged &&
+    runningNonAgentTask === previous.claudeRunningNonAgentTask
+  ) {
     return previous
   }
   const { claudeRunningNonAgentTask: _unpaired, ...unpaired } = previous
@@ -42,7 +51,10 @@ export function withHeldChildWaitMainAgent(
     ...(runningNonAgentTask !== undefined
       ? { claudeRunningNonAgentTask: runningNonAgentTask }
       : {}),
-    payload: mainAgentChanged ? { ...previous.payload, mainAgent } : previous.payload
+    payload:
+      mainAgentChanged || wakeupChanged
+        ? { ...previous.payload, mainAgent, claudeTaskWakeupPending: pendingWakeup }
+        : previous.payload
   }
 }
 
@@ -86,7 +98,7 @@ function isClaudePermissionOwningChildEnding(
   if (!ownerId) {
     return false
   }
-  if (next.hookEventName === 'SubagentStop') {
+  if (isClaudeChildTurnEndEvent(next.hookEventName, next.toolAgentId)) {
     return ownerId === next.toolAgentId?.trim()
   }
   return (

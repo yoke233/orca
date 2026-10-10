@@ -9,7 +9,9 @@ import {
 import { getConnectionId } from '@/lib/connection-context'
 import { detectLanguage } from '@/lib/language-detect'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { newAgentLaunchRequestId } from '@/lib/agent-launch-request-id'
 import { resolveDefaultAgentForNewTab } from '@/lib/agent-tab-shortcuts'
+import { readDetectedAgentsForWorktree } from '@/lib/agent-detection-target-inventory'
 import { translate } from '@/i18n/i18n'
 import type { GitHistoryItem } from '../../../../../../shared/git-history'
 import type {
@@ -253,13 +255,9 @@ export function useGitHistoryCommitActions({
         return
       }
       const state = useAppStore.getState()
-      const connectionId = getConnectionId(activeWorktreeId)
       const agent = resolveDefaultAgentForNewTab({
         defaultTuiAgent: state.settings?.defaultTuiAgent,
-        detectedAgentIds:
-          typeof connectionId === 'string'
-            ? state.remoteDetectedAgentIds[connectionId]
-            : state.detectedAgentIds,
+        detectedAgentIds: readDetectedAgentsForWorktree(state, activeWorktreeId),
         disabledTuiAgents: state.settings?.disabledTuiAgents
       })
       if (!agent) {
@@ -280,6 +278,7 @@ export function useGitHistoryCommitActions({
         `Run \`git show --no-ext-diff ${item.id}\` to inspect the full diff, then summarize what changed and why at a high level, calling out the most important files and any risks.`
       ].join('\n')
       launchAgentInNewTab({
+        requestId: newAgentLaunchRequestId(),
         agent,
         worktreeId: activeWorktreeId,
         prompt: explainPrompt,

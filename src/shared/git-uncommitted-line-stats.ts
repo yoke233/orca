@@ -136,7 +136,7 @@ async function countFileAdditions(
       return rememberUntrackedStats(absolutePath, fileStat, {})
     }
     const { buffer } = openFile
-      ? await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES, openFile)
+      ? await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES, {}, openFile)
       : await readNodeFileWithinLimit(absolutePath, MAX_UNTRACKED_LINE_COUNT_BYTES)
     if (isBinaryBuffer(buffer)) {
       return rememberUntrackedStats(absolutePath, fileStat, {})

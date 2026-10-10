@@ -1,6 +1,5 @@
 // @ts-nocheck -- mechanically split declarations.
-import { basename, extname } from 'node:path'
-import { isENOENT } from '../ipc/filesystem-path-containment'
+import { extname } from 'node:path'
 import type { Store } from '../persistence'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
 import type { TerminalFileGrant } from './runtime-file-commands-mobile-file-list-limit'
@@ -19,7 +18,7 @@ import {
   localTerminalArtifactRoots,
   readFileHandleBufferBounded
 } from './runtime-file-commands-terminal-artifact-access'
-import { isBinaryBuffer } from './runtime-file-command-host'
+import { isBinaryBuffer } from '../../shared/binary-buffer'
 import type { RuntimeFilePreviewResult } from '../../shared/runtime-types'
 import {
   isPathInsideOrEqual,
@@ -29,33 +28,6 @@ import {
 } from '../../shared/cross-platform-path'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
 import { workspaceFsPromises } from '../workspace-filesystem'
-
-export async function assertRuntimePathDoesNotExist(targetPath: string): Promise<void> {
-  try {
-    await workspaceFsPromises.lstat(targetPath)
-    throw new Error(
-      `A file or folder named '${basename(targetPath)}' already exists in this location`
-    )
-  } catch (error) {
-    if (!isENOENT(error)) {
-      throw error
-    }
-  }
-}
-
-export function rethrowRuntimeFileCreateError(error: unknown, targetPath: string): never {
-  const name = basename(targetPath)
-  if (error instanceof Error && 'code' in error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === 'EEXIST') {
-      throw new Error(`A file or folder named '${name}' already exists in this location`)
-    }
-    if (code === 'EACCES' || code === 'EPERM') {
-      throw new Error(`Permission denied: unable to create '${name}'`)
-    }
-  }
-  throw error
-}
 
 export async function readLocalMobileFile(filePath: string, store: Store): Promise<string> {
   const authorizedPath = await resolveAuthorizedPath(filePath, store)

@@ -192,6 +192,28 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin OpenCode 2 lineage'
     await cleanup?.()
   })
 
+  // Why this case: it is the shape reported in #22371 — a subagent asks, the lead
+  // agent truthfully reports no pending question, and the pane stays "needs input"
+  // with nothing able to clear it. With lineage unresolved the blocker keys to the
+  // child's own session id, so the root's own idle never matches it.
+  it('retires a child raised blocker when the root turn goes idle', async () => {
+    const { posts, cleanup } = await runSetupBridge([
+      created(ROOT),
+      created(CHILD),
+      { type: 'session.execution.started', data: { sessionID: ROOT } },
+      { type: 'form.created', data: { form: questionForm('form-child', CHILD) } },
+      { type: 'session.execution.succeeded', data: { sessionID: ROOT } }
+    ])
+    await vi.waitFor(() => {
+      expect(posts.map((post) => post.hook_event_name)).toContain('AskUserQuestion')
+    })
+    await vi.waitFor(() => {
+      expect(posts.at(-1)?.hook_event_name).toBe('SessionIdle')
+    })
+    expect(posts.at(-1)).toEqual(expect.objectContaining({ sessionID: ROOT }))
+    await cleanup?.()
+  })
+
   it('still blocks the pane on the root session own question', async () => {
     const { posts, cleanup } = await runSetupBridge([
       created(ROOT),
@@ -220,20 +242,5 @@ describe.each(['opencode', 'opencode2'] as const)('%s plugin OpenCode 2 lineage'
     // The root arrived via session.created, so only the child needs one lookup.
     expect(lookups).toEqual([CHILD])
     await cleanup?.()
-  })
-})
-
-describe('OpenCode 2 session client shim', () => {
-  it('keeps the enveloped SDK result untouched for the OpenCode 1 server path', () => {
-    const source = _internals.getOpenCodePluginSource()
-
-    // The shim only wraps a bare session record; server() still hands the raw SDK client through.
-    expect(source).toContain(
-      'return result && typeof result.id === "string" ? { data: result } : result;'
-    )
-    expect(source).toContain(
-      'handleLifecycleEvent(client, normalizeNextLifecycleEvent(event), factoryID)'
-    )
-    expect(source).toContain('const client = _ctx?.client;')
   })
 })

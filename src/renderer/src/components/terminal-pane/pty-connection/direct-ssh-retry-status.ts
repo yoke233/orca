@@ -1,3 +1,5 @@
+import { isRemoteRuntimePtyId } from '../../../../../shared/remote-runtime-pty-id'
+import { UNRESOLVED_OWNER_HOST_ID } from '../../../../../shared/execution-host'
 import { reportWorkerTerminalUserInput } from '@/lib/worker-terminal-takeover-report'
 import { useAppStore } from '@/store'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
@@ -6,10 +8,6 @@ import {
   hasCachedWindowsTerminalCapabilities
 } from '@/lib/windows-terminal-capabilities'
 import { requestTerminalWritePipelineProbe } from '@/lib/pane-manager/terminal-write-pipeline-health'
-import {
-  RESET_KITTY_KEYBOARD_PROTOCOL,
-  RESET_TERMINAL_CURSOR_STYLE
-} from '../../../../../shared/terminal-mode-reset-profiles'
 import { subscribeToTerminalUserInput } from '../terminal-user-input-signal'
 import {
   isLocalNativeWindowsConpty,
@@ -32,7 +30,6 @@ import {
 } from '../renderer-owned-agent-status-registry'
 
 import { DIRECT_SSH_PANE_RETRY_SETTLEMENT_TIMEOUT_MS } from './pty-connect-limits'
-import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { resolveLatestAgentDoneStartedAt } from './agent-done-started-at'
 import { rendererAgentStatusObservations } from '@/lib/renderer-agent-status-observations'
 
@@ -71,7 +68,7 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
   // transient cursor-show (?25h) and leaves the cursor invisible. The execution
   // host is the authoritative signal: only a 'local' host is a local native PTY.
   session.executionHostId = session.terminalOwnerUnresolved
-    ? ('runtime:unresolved-owner' as const)
+    ? UNRESOLVED_OWNER_HOST_ID
     : getExecutionHostIdForWorktree(session.state, session.deps.worktreeId)
   session.isNativeWindowsConpty = isLocalNativeWindowsConpty({
     userAgent: navigator.userAgent,
@@ -86,11 +83,6 @@ export function installDirectSshRetryStatus(session: ConnectPanePtySession): voi
     ),
     executionHostId: session.executionHostId
   })
-  if (session.isNativeWindowsConpty) {
-    // Why: Windows ConPTY agent turns can leave renderer keyboard modes armed
-    // after completion, corrupting plain input with encoded bytes.
-    session.idleAgentTerminalModeReset = `${RESET_TERMINAL_CURSOR_STYLE}${RESET_KITTY_KEYBOARD_PROTOCOL}`
-  }
   session.shouldApplyNativeWindowsRewriteRefresh = session.isNativeWindowsConpty
   session.shouldApplyWindowsRendererUnicodeRefresh = CLIENT_PLATFORM === 'win32'
   session.shouldProtectNativeWindowsSynchronizedOutput = session.isNativeWindowsConpty

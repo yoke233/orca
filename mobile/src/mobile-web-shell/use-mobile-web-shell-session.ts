@@ -21,10 +21,8 @@ import type {
   MobileWebShellSessionEffect,
   MobileWebShellSessionEvent,
   MobileWebShellSessionState,
-  MobileWebShellUpdateNotice,
-  PageReadyDeclaration
+  MobileWebShellUpdateNotice
 } from './mobile-web-shell-session-contract'
-import { shellPageOwnsSafeArea } from './page-document-state'
 
 export type MobileWebShellSessionView = {
   readonly state: MobileWebShellSessionState
@@ -32,6 +30,7 @@ export type MobileWebShellSessionView = {
   readonly pageRoutes: readonly string[]
   readonly pageRouteGrants: readonly { pathname: string; grants: readonly string[] }[]
   readonly routeGrants: readonly string[]
+  readonly ownsHostArea: boolean
   /** Non-null when this generation is a fallback from an update the shell refused, for the caller
    *  to say so beside the page rather than instead of it. */
   readonly updateNotice: MobileWebShellUpdateNotice | null
@@ -42,10 +41,9 @@ export type MobileWebShellSessionView = {
   readonly reportDocumentStarted: () => void
   /** The native view finished a document; starts the wait for the page's first word. */
   readonly reportDocumentLoaded: () => void
-  /** The page spoke over the bridge; ends that wait, whichever of the two arrived first. Carries
-   *  what that `ready` declared it reports, which is what says whether a paint is coming. */
-  readonly reportPageReady: (ready: PageReadyDeclaration) => void
-  /** The page has a frame on screen. Ignored for a page that never said it would report one. */
+  /** The page spoke over the bridge; ends that wait, whichever of the two arrived first. */
+  readonly reportPageReady: () => void
+  /** The page has a frame on screen. */
   readonly reportPagePainted: () => void
   /** The page took the device Back key, or let it go. */
   readonly reportPageBackClaim: (claimed: boolean) => void
@@ -62,9 +60,6 @@ export type MobileWebShellSessionView = {
   /** Whether the shell should take Back off the navigator. Projected for the same reason as
    *  `pageReady`: a claim moves nothing else, so no other value would re-render to carry it. */
   readonly backClaimed: boolean
-  /** Whether the document on screen pads for the system bars itself. Projected for the same
-   *  reason as `backClaimed`. */
-  readonly pageOwnsSafeArea: boolean
 }
 
 /**
@@ -78,9 +73,12 @@ export function useMobileWebShellSession(args: {
   hostId: string
   /** The route this mount stands for, matched against the page routes the bundle declares. */
   routePathname: string
+  /** A wide layout; a change restarts the session only where it changes the answer. */
+  wide?: boolean
   runtime?: MobileWebShellRuntime
 }): MobileWebShellSessionView {
   const { hostId, routePathname } = args
+  const wide = args.wide === true
   const gates = useHostProtocolGates()
   const { client, state: connState } = useHostClient(hostId)
 
@@ -90,14 +88,11 @@ export function useMobileWebShellSession(args: {
   const storeRef = useRef<GenerationStore | null>(null)
   storeRef.current ??= runtime.createStore()
 
-  const sessionRef = useRef(createMobileWebShellSession(routePathname))
+  const sessionRef = useRef(createMobileWebShellSession(routePathname, wide))
   const [state, setState] = useState(sessionRef.current.state)
   const [pageReady, setPageReady] = useState(sessionRef.current.pageReady)
   const [pageFrame, setPageFrame] = useState(() => shellPageFrame(sessionRef.current))
   const [backClaimed, setBackClaimed] = useState(() => shellPageBackClaimed(sessionRef.current))
-  const [pageOwnsSafeArea, setPageOwnsSafeArea] = useState(() =>
-    shellPageOwnsSafeArea(sessionRef.current)
-  )
   const hostKey = useMemo(() => deriveHostCacheKey(hostId), [hostId])
   const startedAtRef = useRef(runtime.now())
   // Bumped by anything that invalidates work in flight; every dispatch out of an effect checks it.
@@ -121,7 +116,6 @@ export function useMobileWebShellSession(args: {
     setPageReady(stepped.session.pageReady)
     setPageFrame(shellPageFrame(stepped.session))
     setBackClaimed(shellPageBackClaimed(stepped.session))
-    setPageOwnsSafeArea(shellPageOwnsSafeArea(stepped.session))
     for (const effect of stepped.effects) {
       // Every effect of a step belongs to the flow that step produced, and its result carries that
       // number back, so a flow the session has since restarted reports into nothing.
@@ -224,13 +218,17 @@ export function useMobileWebShellSession(args: {
   useEffect(() => {
     // A new host is a new session: the old one's latches, cache handle and in-flight work all go.
     invalidate()
-    sessionRef.current = createMobileWebShellSession(routePathname)
+    sessionRef.current = createMobileWebShellSession(routePathname, wide)
     startedAtRef.current = runtime.now()
     setState(sessionRef.current.state)
     setPageReady(sessionRef.current.pageReady)
     setPageFrame(shellPageFrame(sessionRef.current))
     return invalidate
   }, [hostId, invalidate, routePathname, runtime])
+
+  useEffect(() => {
+    dispatch(epochRef.current, { type: 'layout-changed', wide })
+  }, [dispatch, wide])
 
   const { statusPending, statusReadable, hostCapabilities, hostProtocolWindow } = gates
   const reachability = readMobileWebShellReachability(connState, client)
@@ -281,12 +279,9 @@ export function useMobileWebShellSession(args: {
     dispatch(epochRef.current, { type: 'document-loaded' })
   }, [dispatch])
 
-  const reportPageReady = useCallback(
-    (ready: PageReadyDeclaration) => {
-      dispatch(epochRef.current, { type: 'page-ready', ...ready })
-    },
-    [dispatch]
-  )
+  const reportPageReady = useCallback(() => {
+    dispatch(epochRef.current, { type: 'page-ready' })
+  }, [dispatch])
 
   const reportPagePainted = useCallback(() => {
     dispatch(epochRef.current, { type: 'page-painted' })
@@ -306,6 +301,7 @@ export function useMobileWebShellSession(args: {
     pageRoutes: sessionRef.current.pageRoutes,
     pageRouteGrants: sessionRef.current.pageRouteGrants,
     routeGrants: sessionRef.current.routeGrants,
+    ownsHostArea: sessionRef.current.ownsHostArea,
     updateNotice: sessionRef.current.updateNotice,
     retry,
     reportShellFailure,
@@ -314,7 +310,6 @@ export function useMobileWebShellSession(args: {
     reportPageReady,
     reportPagePainted,
     reportPageBackClaim,
-    backClaimed,
-    pageOwnsSafeArea
+    backClaimed
   }
 }

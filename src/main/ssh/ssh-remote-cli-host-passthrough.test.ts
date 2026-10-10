@@ -29,6 +29,7 @@ import {
   ORCHESTRATION_COMPATIBILITY_HOST_KIND_ENV
 } from '../../shared/orchestration-compatibility-evidence'
 import { REMOTE_ARTIFACT_INPUT_ENV } from '../../shared/artifact-cli-bridge'
+import { CONTROL_GRANTED_SSH_BRIDGE_SCOPE } from './ssh-bridge-caller-scope.test-fixture'
 
 type FakeChild = EventEmitter & {
   stdout: EventEmitter
@@ -67,6 +68,7 @@ describe('resolveHostCliEntryPath', () => {
 describe('buildHostCliEnv', () => {
   it('forwards only Orca terminal-context vars from the remote env', () => {
     const env = buildHostCliEnv({
+      bridgeCredential: 'sshb_test',
       hostEnv: { PATH: '/host/bin', NODE_OPTIONS: '--inspect' },
       remoteEnv: {
         ORCA_TERMINAL_HANDLE: 'term_remote',
@@ -120,6 +122,7 @@ describe('buildHostCliEnv', () => {
     ['Windows host', { ComSpec: 'C:\\Windows\\System32\\cmd.exe' }]
   ])('pins %s recovery to the remote shim', (_name, hostEnv) => {
     const env = buildHostCliEnv({
+      bridgeCredential: 'sshb_test',
       hostEnv,
       remoteEnv: { ORCA_CLI_COMMAND: 'untrusted-remote-command' },
       userDataPath: '/host/user-data',
@@ -127,6 +130,58 @@ describe('buildHostCliEnv', () => {
     })
 
     expect(env.ORCA_CLI_COMMAND).toBe('orca')
+  })
+
+  it('stamps this runtime as the source and ignores remote or inherited stamps', () => {
+    const remoteSource = {
+      ORCA_RUNTIME_SOURCE_ID: 'remote-chosen-source',
+      ORCA_RUNTIME_SOURCE_INCARNATION: 'remote-chosen-runtime'
+    }
+    const build = (runtimeSource?: { sourceId: string; incarnation: string } | null) =>
+      buildHostCliEnv({
+        bridgeCredential: 'sshb_test',
+        hostEnv: {
+          ORCA_RUNTIME_SOURCE_ID: 'parent-source',
+          ORCA_RUNTIME_SOURCE_INCARNATION: 'parent-runtime'
+        },
+        remoteEnv: remoteSource,
+        userDataPath: '/host/user-data',
+        remoteCwd: '/srv/repo',
+        runtimeSource
+      })
+
+    expect(build({ sourceId: 'this-source', incarnation: 'this-runtime' })).toMatchObject({
+      ORCA_RUNTIME_SOURCE_ID: 'this-source',
+      ORCA_RUNTIME_SOURCE_INCARNATION: 'this-runtime',
+      ORCA_RUNTIME_SOURCE_PROFILE_PATH: '/host/user-data',
+      ORCA_USER_DATA_PATH: '/host/user-data'
+    })
+    const unstamped = build(null)
+    expect(unstamped.ORCA_RUNTIME_SOURCE_ID).toBeUndefined()
+    expect(unstamped.ORCA_RUNTIME_SOURCE_INCARNATION).toBeUndefined()
+  })
+
+  it('never lets a remote command claim a local agent session', () => {
+    // The host's env carries a session id when Orca was launched inside a structured session; the
+    // remote shell's own is from another machine. Session identity is same-host only.
+    const env = buildHostCliEnv({
+      bridgeCredential: 'sshb_test',
+      hostEnv: {
+        ORCA_AGENT_SESSION_ID: 'f7a1c0de-1111-4222-8333-444455556666',
+        ORCA_STRUCTURED_SESSION: '1'
+      },
+      remoteEnv: {
+        ORCA_TERMINAL_HANDLE: 'term_remote',
+        ORCA_AGENT_SESSION_ID: 'a0b1c2d3-0000-4000-8000-00000000abcd'
+      },
+      userDataPath: '/host/user-data',
+      remoteCwd: '/srv/repo'
+    })
+
+    expect(env.ORCA_AGENT_SESSION_ID).toBeUndefined()
+    expect(env.ORCA_STRUCTURED_SESSION).toBeUndefined()
+    // The remote command still speaks as its own terminal.
+    expect(env.ORCA_TERMINAL_HANDLE).toBe('term_remote')
   })
 
   it('namespaces identical remote artifact paths by stable SSH target', () => {
@@ -137,6 +192,7 @@ describe('buildHostCliEnv', () => {
     }
     const build = (targetId: string) =>
       buildHostCliEnv({
+        bridgeCredential: 'sshb_test',
         hostEnv: {},
         remoteEnv: {},
         userDataPath: '/host/user-data',
@@ -267,6 +323,7 @@ describe('runHostOrcaCliPassthrough', () => {
 
     const resultPromise = runHostOrcaCliPassthrough(
       {
+        callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE,
         argv: ['orchestration', 'task-create', '--spec', 'do the thing', '--json'],
         cwd: '/home/alice/wt',
         env: { ORCA_TERMINAL_HANDLE: 'term_remote' }
@@ -311,6 +368,7 @@ describe('runHostOrcaCliPassthrough', () => {
 
     const resultPromise = runHostOrcaCliPassthrough(
       {
+        callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE,
         argv: ['linear', 'comment', 'add', 'ENG-1', '--body-file', '-'],
         cwd: '/home/alice/wt',
         env: {},
@@ -331,7 +389,12 @@ describe('runHostOrcaCliPassthrough', () => {
     const spawn = vi.fn(() => child)
 
     const resultPromise = runHostOrcaCliPassthrough(
-      { argv: ['worktree', 'show'], cwd: '/', env: {} },
+      {
+        callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE,
+        argv: ['worktree', 'show'],
+        cwd: '/',
+        env: {}
+      },
       { ...BASE_OPTIONS, spawn: spawn as never }
     )
 
@@ -346,7 +409,7 @@ describe('runHostOrcaCliPassthrough', () => {
     const spawn = vi.fn()
     await expect(
       runHostOrcaCliPassthrough(
-        { argv: ['status'], cwd: '/', env: {} },
+        { callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE, argv: ['status'], cwd: '/', env: {} },
         { ...BASE_OPTIONS, entryExists: () => false, spawn: spawn as never }
       )
     ).rejects.toBeInstanceOf(HostCliUnavailableError)
@@ -357,7 +420,7 @@ describe('runHostOrcaCliPassthrough', () => {
     const spawn = vi.fn()
     await expect(
       runHostOrcaCliPassthrough(
-        { argv: ['status'], cwd: '/', env: {} },
+        { callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE, argv: ['status'], cwd: '/', env: {} },
         { ...BASE_OPTIONS, spawn: spawn as never, killTimeoutMs: 2_147_483_648 }
       )
     ).rejects.toBeInstanceOf(RangeError)
@@ -369,7 +432,7 @@ describe('runHostOrcaCliPassthrough', () => {
     const spawn = vi.fn(() => child)
 
     const resultPromise = runHostOrcaCliPassthrough(
-      { argv: ['status'], cwd: '/', env: {} },
+      { callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE, argv: ['status'], cwd: '/', env: {} },
       { ...BASE_OPTIONS, spawn: spawn as never }
     )
 
@@ -386,7 +449,12 @@ describe('runHostOrcaCliPassthrough', () => {
       const spawn = vi.fn(() => child)
 
       const resultPromise = runHostOrcaCliPassthrough(
-        { argv: ['terminal', 'wait', '--for', 'exit'], cwd: '/', env: {} },
+        {
+          callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE,
+          argv: ['terminal', 'wait', '--for', 'exit'],
+          cwd: '/',
+          env: {}
+        },
         { ...BASE_OPTIONS, spawn: spawn as never, killTimeoutMs: 1000 }
       )
 
@@ -405,7 +473,12 @@ describe('runHostOrcaCliPassthrough', () => {
     const spawn = vi.fn(() => child)
 
     const resultPromise = runHostOrcaCliPassthrough(
-      { argv: ['terminal', 'read'], cwd: '/', env: {} },
+      {
+        callerScope: CONTROL_GRANTED_SSH_BRIDGE_SCOPE,
+        argv: ['terminal', 'read'],
+        cwd: '/',
+        env: {}
+      },
       { ...BASE_OPTIONS, spawn: spawn as never }
     )
 
