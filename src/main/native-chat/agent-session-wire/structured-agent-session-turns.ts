@@ -68,9 +68,17 @@ export type AgentSessionTurnContext = {
   publish: () => void
   /** Who a Stop's refusal row names. */
   failureTextContext?: AgentSessionFailureWordsContext
-  /** The operation's success, committed with the row that accepts it (`settlesWithWrite` or `acceptsWithCommandReceipt`). */
-  operationReceipt?: JournalOperationReceipt
+  /** The operation's success, committed with the row that accepts it (`settlesWithWrite` or `commandReceipt`). */
+  operationReceipt?: AgentSessionOperationReceipt
   now: () => number
+}
+
+/** What accepts an operation: written with the row that accepts it, or committed alone. */
+export type AgentSessionOperationReceipt = JournalOperationReceipt & {
+  /** Whether it has committed, with a row or alone. */
+  isCommitted: () => boolean
+  /** Commits it naming no row; nothing once it has committed. */
+  commitAlone: () => Promise<void>
 }
 
 export type TurnOutcome<TValue> =

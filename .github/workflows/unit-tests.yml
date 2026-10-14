@@ -20,6 +20,12 @@ on:
         default: false
         type: boolean
 
+      run_shards:
+        description: Run the planned root unit shards.
+        required: false
+        default: true
+        type: boolean
+
       shards:
         description: JSON array of shard assignments, produced by unit-plan.yml.
         required: true
@@ -30,6 +36,7 @@ permissions:
 
 jobs:
   test:
+    if: inputs.run_shards
     name: tests node ${{ matrix.node }} ${{ matrix.shard.index }}/${{ matrix.shard.count }}
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 60
@@ -66,6 +73,7 @@ jobs:
 
       - name: Test shard
         env:
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/orca-node-compile-cache-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.node }}-${{ matrix.shard.index }}
           ORCA_BALANCE_UNIT_SHARDS: '1'
           ORCA_BACKGROUND_LAUNCH: '1'
         run: |

@@ -1,3 +1,9 @@
+import type { AgentLaunchRuntime } from '../../shared/agent-launch-runtime'
+import type {
+  AutomaticWorkResumeOutcome,
+  AutomaticWorkStatus,
+  SpawnIntent
+} from '../../shared/host-spawn-admission'
 import type {
   AgentSessionClaimedSpawnResult,
   AgentSessionExecutionClaim,
@@ -10,7 +16,11 @@ import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { PtyBindingSourceExpectation } from '../persistence'
 import type { TerminalPanePlacement } from '../../shared/terminal-pane-placement'
 import type { ExecutionHostId } from '../../shared/execution-host'
-import type { PtyProviderBufferSnapshot, PtyProcessInfo, PtySpawnResult } from '../providers/types'
+import type {
+  PtyProviderBufferSnapshot,
+  PtyProcessInfo,
+  PtySpawnResult
+} from '../providers/pty-provider-contract'
 import type { PtyProcessInspection } from '../providers/pty-process-inspection'
 import type { WriteSettlement } from '../../shared/pty-write-settlement'
 import type { TerminalInputKind } from '../../shared/terminal-input-kind'
@@ -67,6 +77,8 @@ export type RuntimePtyController = {
     sessionId?: string
     /** Windows shell to spawn AS this PTY, instead of the host default. */
     shellOverride?: string
+    /** The agent launch's runtime fact; when present the PTY shell comes only from it. */
+    launchRuntime?: AgentLaunchRuntime
     isNewSession?: boolean
     /** No renderer view exists at spawn; main owns delivery and query replies until one mounts. */
     initiallyHidden?: boolean
@@ -80,6 +92,7 @@ export type RuntimePtyController = {
       surface: AgentSessionSurfaceBinding
     }
     agentSessionCreateOperationId?: string
+    spawnIntent?: SpawnIntent
     signal?: AbortSignal
     refuseSleptWorktree?: boolean
     onPtySpawnCommitted?: () => void
@@ -102,6 +115,9 @@ export type RuntimePtyController = {
     stablePaneOwner?: { handle: string; tabId: string; leafId: string }
     agentSessionEnsure?: AgentSessionClaimedSpawnResult
   }>
+  /** The local terminal owner's automatic-restore state; null when it has no fork gate. */
+  getAutomaticWorkStatus?(): Promise<AutomaticWorkStatus | null>
+  resumeAutomaticWork?(): Promise<AutomaticWorkResumeOutcome>
   write(ptyId: string, data: string, inputKind: TerminalInputKind): boolean
   /** Three-valued settlement; local providers settle synchronously. */
   writeWithSettlement?(
@@ -119,9 +135,6 @@ export type RuntimePtyController = {
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }
   ): Promise<boolean>
-  /** Durably records a kill order for an explicit close's unconfirmed stop, replayed when its SSH
-   *  host reconnects. True only when an order was written; local PTYs have no later host to ask. */
-  recordUnconfirmedStop?(ptyId: string): boolean
   getCwd?(ptyId: string): Promise<string | null>
   getForegroundProcess(ptyId: string): Promise<string | null>
   inspectProcess?(

@@ -1,10 +1,10 @@
 import { constants, type Stats } from 'node:fs'
-import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {
   RuntimeUploadFileStreamRequest,
   StagedRuntimeUploadFileIdentity
 } from '../../shared/runtime-upload-staging-contract'
+import { workspaceFsPromises } from '../workspace-filesystem'
 import { formatByteCeiling, REMOTE_IMPORT_MAX_FILE_BYTES } from './runtime-import-limits'
 import {
   isRuntimeEnvironmentManuallyDisconnected,
@@ -73,7 +73,7 @@ export async function streamExternalFileSlices(
   // Why: relativePath is the hidden .orca-upload-<nonce> temp destination, so a
   // dropped file names its source instead of a path the user never chose.
   const displayPath = args.entryRelativePath || basename(args.sourceRootPath)
-  const lstatResult = await lstat(sourcePath)
+  const lstatResult = await workspaceFsPromises.lstat(sourcePath)
   if (lstatResult.isSymbolicLink()) {
     throw new Error(`Symlink not allowed in '${displayPath}'`)
   }
@@ -87,7 +87,10 @@ export async function streamExternalFileSlices(
 
   args.signal?.throwIfAborted()
 
-  const handle = await open(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  const handle = await workspaceFsPromises.open(
+    sourcePath,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+  )
   try {
     const openedStat = await handle.stat()
     if (!openedStat.isFile()) {
@@ -228,8 +231,8 @@ async function assertEntryInsideRoot(
   candidatePath: string,
   displayPath: string
 ): Promise<void> {
-  const rootRealPath = await realpath(sourceRootPath)
-  const candidateRealPath = await realpath(candidatePath)
+  const rootRealPath = await workspaceFsPromises.realpath(sourceRootPath)
+  const candidateRealPath = await workspaceFsPromises.realpath(candidatePath)
   const relativeToRoot = relative(rootRealPath, candidateRealPath)
   // Why: `..name` is a valid child path; only `..` and `../...` escape.
   if (

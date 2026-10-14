@@ -33,11 +33,7 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
     if (!hostTabId) {
       throw new Error('tab_not_found')
     }
-    const publicSnapshot = this.toMobileSessionTabsResult(snapshot)
-    const targetGroup = publicSnapshot.tabGroups?.find((group) => group.id === move.targetGroupId)
-    if (!targetGroup) {
-      throw new Error('target_group_not_found')
-    }
+    const targetGroup = this.requireHeadlessTargetGroup(snapshot, move.targetGroupId)
     const tabOrder = this.normalizeMobileSessionTabOrder(snapshot, targetGroup, move.tabOrder)
     const orderIndexByParentTabId = new Map(tabOrder.map((tabId, index) => [tabId, index]))
     const nextTabs = [...snapshot.tabs].sort((a, b) => {
@@ -87,6 +83,7 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
     if (!hostTabId) {
       throw new Error('tab_not_found')
     }
+    this.requireHeadlessTargetGroup(snapshot, move.targetGroupId)
     const split = buildHeadlessTabGroupSplit({
       groups: snapshot.tabGroups ?? [],
       layout: snapshot.tabGroupLayout,
@@ -125,6 +122,7 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
     if (!hostTabId) {
       throw new Error('tab_not_found')
     }
+    this.requireHeadlessTargetGroup(snapshot, move.targetGroupId)
     const moved = buildHeadlessTabGroupMove({
       groups: snapshot.tabGroups ?? [],
       layout: snapshot.tabGroupLayout,
@@ -133,7 +131,7 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
       index: move.index
     })
     if (!moved) {
-      // Same-group / missing-target drop is a renderer no-op; mirror that.
+      // Same-group drop is a renderer no-op; mirror that.
       return { moved: true }
     }
     const layout = moved.layout ?? { type: 'leaf' as const, groupId: move.targetGroupId }
@@ -152,8 +150,22 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
     return { moved: true }
   }
 
-  // Persist the headless tab-GROUP layout so snapshot rebuilds keep the split; the tab bar and rows
-  // follow the groups. Deleted by the switch (PR 6), when moves are layout commands.
+  // Why: the builders return null for a missing target AND a legit no-op; only the no-op may succeed.
+  protected requireHeadlessTargetGroup(
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    targetGroupId: string
+  ): RuntimeMobileSessionTabGroup {
+    const targetGroup = this.toMobileSessionTabsResult(snapshot).tabGroups?.find(
+      (group) => group.id === targetGroupId
+    )
+    if (!targetGroup) {
+      throw new Error('target_group_not_found')
+    }
+    return targetGroup
+  }
+
+  // Persist the headless tab-GROUP layout so snapshot rebuilds keep the split; the tab bar follows
+  // the groups. Deleted by the switch (PR 6), when moves are layout commands.
   protected persistHeadlessTabGroups(
     worktreeId: string,
     groups: readonly RuntimeMobileSessionTabGroup[],
@@ -163,28 +175,13 @@ export class OrcaRuntimeWithMoveHeadlessMobileSessionTab extends OrcaRuntimeWith
     if (!session || !this.store?.setWorkspaceSession) {
       return
     }
-    const order = groups.flatMap((group) => group.tabOrder)
     const groupIdByTabId = new Map(
       groups.flatMap((group) => group.tabOrder.map((tabId) => [tabId, group.id] as const))
     )
-    const position = (tabId: string): number => {
-      const index = order.indexOf(tabId)
-      return index === -1 ? order.length : index
-    }
     const entries = session.unifiedTabs?.[worktreeId]
-    const rows = session.tabsByWorktree[worktreeId]
+    // The Store orders the rows by these groups on write.
     this.setWorkspaceSessionForWorktree(worktreeId, {
       ...session,
-      ...(rows
-        ? {
-            tabsByWorktree: {
-              ...session.tabsByWorktree,
-              [worktreeId]: [...rows]
-                .sort((a, b) => position(a.id) - position(b.id) || a.sortOrder - b.sortOrder)
-                .map((row, sortOrder) => ({ ...row, sortOrder }))
-            }
-          }
-        : {}),
       ...(entries
         ? {
             unifiedTabs: {

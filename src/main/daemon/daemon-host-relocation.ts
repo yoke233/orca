@@ -4,6 +4,7 @@ import { join, win32 as winPath } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
 import {
   buildDaemonHostManifest,
+  daemonHostFitsPathBudget,
   destPath,
   executeManifest,
   toPosixRelative,
@@ -35,8 +36,8 @@ import { inspectProcessLiveness, mergeProcessLivenessVerdict } from './daemon-pr
  * any failure returns null and the caller forks the install-dir host (pre-relocation behavior).
  *
  * What escapes the updater is the PATH, not the file name: electron-builder's kill sweep selects
- * processes whose image path sits under $INSTDIR. See docs/reference/windows-daemon-host-relocation.md
- * for the survival contract and why the exe is copied verbatim rather than renamed.
+ * processes whose image path sits under $INSTDIR, which is why the exe is copied verbatim rather
+ * than renamed.
  */
 
 export type RelocatedDaemonHost = {
@@ -215,6 +216,7 @@ function findRelocatedDaemonHost(
   for (const { dest, marker } of candidates) {
     if (
       !marker ||
+      !daemonHostFitsPathBudget(sources, dest) ||
       marker.version !== version ||
       !daemonHostBuildRuntimeMatches(marker, sources) ||
       marker.fingerprint !== fingerprint ||
@@ -263,7 +265,12 @@ export function materializeRelocatedDaemonHost(): RelocatedDaemonHost | null {
   const root = getDaemonHostRootDir()
   const versionRoot = join(root, version)
   const nonce = randomBytes(6).toString('hex')
-  const dest = join(versionRoot, `build-${inventory.fingerprint}-${nonce}`)
+  // The marker carries the fingerprint; the name need only be unique, and short (conpty path budget).
+  const dest = join(versionRoot, `build-${nonce}`)
+  if (!daemonHostFitsPathBudget(sources, dest)) {
+    console.warn(`[daemon] Not relocating the daemon host: ${dest} is too deep for conpty.dll`)
+    return null
+  }
   const staging = join(versionRoot, daemonHostStagingName(process.pid, nonce))
   try {
     mkdirSync(versionRoot, { recursive: true })

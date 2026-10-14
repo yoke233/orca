@@ -129,6 +129,10 @@ async function resolveAuthorizedMissingPath(
       if (!isENOENT(error)) {
         throw error
       }
+      if (await isSymlink(existingAncestor)) {
+        // Why: realpath can't say where a dangling link leads, but a write follows it and creates its target.
+        throw new Error(PATH_ACCESS_DENIED_MESSAGE)
+      }
       const parent = dirname(existingAncestor)
       if (parent === existingAncestor) {
         throw error
@@ -137,6 +141,17 @@ async function resolveAuthorizedMissingPath(
       missingSegments.unshift(basename(existingAncestor))
       existingAncestor = parent
     }
+  }
+}
+
+async function isSymlink(path: string): Promise<boolean> {
+  try {
+    return (await workspaceFsPromises.lstat(path)).isSymbolicLink()
+  } catch (error) {
+    if (isENOENT(error)) {
+      return false
+    }
+    throw error
   }
 }
 

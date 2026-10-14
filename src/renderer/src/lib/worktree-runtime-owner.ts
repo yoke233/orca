@@ -5,7 +5,6 @@ import {
   UNRESOLVED_OWNER_HOST_ID
 } from '../../../shared/execution-host'
 import type { ExecutionHostId } from '../../../shared/execution-host'
-import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { Worktree } from '../../../shared/worktree/types'
 import { parseWorkspaceKey } from '../../../shared/workspace-scope'
 import { getRepoIdFromWorktreeId } from '@/store/slices/worktree-helpers'
@@ -27,12 +26,10 @@ import {
 import {
   getFloatingWorkspaceOperationRoute,
   resolveActiveWorkspaceRoute,
-  resolveExplicitWorktreeOperationRouteResult,
   resolveWorktreeOperationRouteResult
 } from './worktree-operation-route'
+import { resolveExplicitWorktreeOperationRouteResult } from './worktree-operation-catalog-route'
 import type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner-state'
-export type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner-state'
-export { getRuntimeSessionMirrorEnvironmentIds } from './runtime-session-mirror-owners'
 
 function getExplicitRuntimeEnvironmentIdFromHost(
   executionHostId: string | null | undefined
@@ -248,14 +245,4 @@ export function getExecutionHostIdForWorktree(
     getKnownExecutionHostIdForWorktree(state, worktreeId) ??
     getFocusedRuntimeOrLocalExecutionHostId(state)
   )
-}
-
-export function getSettingsForWorktreeRuntimeOwner(
-  state: WorktreeRuntimeOwnerState,
-  worktreeId: string | null | undefined
-): Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> {
-  return {
-    ...state.settings,
-    activeRuntimeEnvironmentId: getRuntimeEnvironmentIdForWorktree(state, worktreeId)
-  }
 }

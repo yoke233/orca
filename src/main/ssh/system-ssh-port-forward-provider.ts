@@ -4,6 +4,7 @@ import {
   systemSshForwardError
 } from './system-ssh-forward-process'
 import type {
+  ForwardChannelOpenFailure,
   PortForwardStartOptions,
   SshPortForwardProvider,
   StartedPortForward
@@ -21,14 +22,15 @@ export class SystemSshPortForwardProvider implements SshPortForwardProvider {
       options.localPort,
       options.remoteHost,
       options.remotePort,
-      conn.getSystemSshBuildArgsOptions()
+      // The managed tunnel reads the channel answer from stderr (lastChannelOpenFailure).
+      { ...conn.getSystemSshBuildArgsOptions(), logChannelFailures: true }
     )
 
     await forward.waitForStartup()
     // Why: this stderr stays attached for the forward's whole lifetime but is
     // only used to build the exit-error detail, so keep a bounded tail — a chatty
     // remote sshd could otherwise grow it unbounded on a long-lived forward
-    // (mirrors MAX_RELAY_STARTUP_BUFFER_BYTES in ssh-relay-deploy-helpers).
+    // (mirrors MAX_RELAY_STARTUP_BUFFER_BYTES in ssh-relay-sentinel).
     const MAX_STDERR_TAIL_BYTES = 64 * 1024
     let stderr = ''
     const onStderr = (chunk: Buffer): void => {
@@ -52,12 +54,13 @@ export class SystemSshPortForwardProvider implements SshPortForwardProvider {
       forward.process.stderr?.off('data', onStderr)
       options.onUnexpectedClose?.(entry, {
         kind: 'unexpected-exit',
-        detail: systemSshForwardError(code, stderr).message
+        detail: systemSshForwardError(code, stderr, forward.localPort).message
       })
     })
 
     return {
       entry,
+      lastChannelOpenFailure: () => lastChannelOpenFailure(stderr),
       close: async () => {
         try {
           await forward.close()
@@ -71,4 +74,16 @@ export class SystemSshPortForwardProvider implements SshPortForwardProvider {
       }
     }
   }
+}
+
+// OpenSSH logs each refused direct-tcpip open as `channel N: open failed: <reason>: <message>`.
+const CHANNEL_OPEN_FAILED = /open failed: (administratively prohibited|connect failed)/g
+
+export function lastChannelOpenFailure(stderr: string): ForwardChannelOpenFailure | null {
+  const reason = [...stderr.matchAll(CHANNEL_OPEN_FAILED)].at(-1)?.[1]
+  return reason === undefined
+    ? null
+    : reason === 'connect failed'
+      ? 'connect-failed'
+      : 'administratively-prohibited'
 }

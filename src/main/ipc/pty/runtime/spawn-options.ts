@@ -1,6 +1,6 @@
 import { getAppEnvironment } from '../../../../shared/app-environment'
 import { getLegacyOpenCodeEnvKeysToDelete } from '../../../opencode/legacy-shared-config-dir'
-import type { IPtyProvider, PtySpawnResult } from '../../../providers/types'
+import type { IPtyProvider, PtySpawnResult } from '../../../providers/pty-provider-contract'
 import { LocalPtyProvider } from '../../../providers/local-pty-provider'
 import { makePaneKey, isTerminalLeafId } from '../../../../shared/stable-pane-id'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
@@ -226,6 +226,9 @@ export async function buildRuntimePtySpawnOptions(
   }
   if (!ctx.preAdoptedStablePane && args.agentSessionCreateOperationId) {
     ctx.spawnOptions.agentSessionCreateOperationId = args.agentSessionCreateOperationId
+  }
+  if (!ctx.preAdoptedStablePane && args.spawnIntent) {
+    ctx.spawnOptions.spawnIntent = args.spawnIntent
   }
   if (args.signal) {
     ctx.spawnOptions.signal = args.signal
