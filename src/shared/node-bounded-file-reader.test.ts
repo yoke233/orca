@@ -43,42 +43,6 @@ describe('readNodeFileWithinLimit', () => {
     expect(handle.close).toHaveBeenCalledOnce()
   })
 
-  it('uses an injected workspace opener alongside read options', async () => {
-    const handle = createFileHandle({ content: Buffer.from('archive bytes') })
-    const workspaceOpen = vi.fn().mockResolvedValue(handle)
-    const controller = new AbortController()
-
-    const result = await readNodeFileWithinLimit(
-      '/workspace/file.asar',
-      64,
-      { signal: controller.signal },
-      workspaceOpen
-    )
-
-    expect(result.buffer).toEqual(Buffer.from('archive bytes'))
-    expect(workspaceOpen).toHaveBeenCalledWith('/workspace/file.asar', 'r')
-    expect(openMock).not.toHaveBeenCalled()
-    expect(handle.close).toHaveBeenCalledOnce()
-  })
-
-  it('honors cancellation before opening through the workspace seam', async () => {
-    const workspaceOpen = vi.fn()
-    const controller = new AbortController()
-    const reason = new Error('cancelled')
-    controller.abort(reason)
-
-    await expect(
-      readNodeFileWithinLimit(
-        '/workspace/file.asar',
-        64,
-        { signal: controller.signal },
-        workspaceOpen
-      )
-    ).rejects.toBe(reason)
-    expect(workspaceOpen).not.toHaveBeenCalled()
-    expect(openMock).not.toHaveBeenCalled()
-  })
-
   it('rejects an oversized initial size before reading file bytes', async () => {
     const handle = createFileHandle({ content: Buffer.alloc(0), initialSize: 65 })
     openMock.mockResolvedValue(handle)

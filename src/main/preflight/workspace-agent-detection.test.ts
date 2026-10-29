@@ -17,6 +17,7 @@ import {
 } from '../../shared/protocol-version'
 import {
   resolveWorkspaceAgentDetectionHost,
+  detectProjectLaunchContext,
   type WorkspaceAgentDetectionStore
 } from './workspace-agent-detection'
 import { _resetWslCachesForTests, _setWslCachesForTests } from '../wsl'
@@ -24,6 +25,12 @@ import { _resetWslCachesForTests, _setWslCachesForTests } from '../wsl'
 const { detectInstalledMock, refreshMock } = vi.hoisted(() => ({
   detectInstalledMock: vi.fn(),
   refreshMock: vi.fn()
+}))
+
+// These cases cover a running distro; the E9 stopped-distro gate has its own suite.
+vi.mock('../wsl/wsl-background-exec-gate', () => ({
+  assertWslDistroRunningForExec: async () => {},
+  runAsWslExecUserAct: async (_distro: unknown, act: () => Promise<unknown>) => act()
 }))
 
 vi.mock('./agent-detection', () => ({
@@ -142,6 +149,23 @@ describe('resolveWorkspaceAgentDetectionHost on a Windows host', () => {
     _resetWslCachesForTests()
   })
 
+  it('prospective detection owns the project runtime before a workspace exists', async () => {
+    detectInstalledMock.mockResolvedValueOnce(['codex'])
+    const target = repo({ id: 'prospective', path: WSL_REPO_PATH })
+    const result = await detectProjectLaunchContext(store({ repos: [target] }), target)
+    expect(result).toMatchObject({
+      workspaceKind: 'git-worktree',
+      executionContext: {
+        kind: 'host',
+        projectRuntime: { status: 'resolved', runtime: { kind: 'wsl' } }
+      }
+    })
+    expect(detectInstalledMock).toHaveBeenCalledWith(
+      wslContext('Ubuntu-24.04', 'prospective', 'project-override'),
+      undefined
+    )
+  })
+
   it('keeps the host default for a workspace no repo row owns', () => {
     const s = store({ repos: [repo({ id: 'r1', path: 'C:\\r1' })] })
     expect(resolveFor(s, 'missing::C:\\x')).toEqual({ kind: 'local' })
@@ -168,7 +192,6 @@ describe('resolveWorkspaceAgentDetectionHost on a Windows host', () => {
         kind: 'ssh',
         connectionId: 'build-host'
       })
-      // Rival rows and no worktree host name no single owner: refuse rather than guess.
       expect(() => resolveFor(s, 'r1::/srv/r1')).toThrow('worktree_execution_host_unresolved')
     }
   })
@@ -181,12 +204,12 @@ describe('resolveWorkspaceAgentDetectionHost on a Windows host', () => {
     })
   })
 
-  // TEMPORARY parity: the agent list checks a WSL-share path's distro against main's cached list.
-  it("checks a WSL-share workspace's distro against the cached list, as main does", () => {
+  it("trusts a WSL-share workspace's distro over a stale cached list", () => {
     _setWslCachesForTests({ available: true, distros: ['Debian'] })
     const s = store({ repos: [repo({ id: 'r1', path: WSL_REPO_PATH })] })
-    expect(resolveFor(s, `r1::${WSL_REPO_PATH}`)).toMatchObject({
-      context: { projectRuntime: { status: 'repair-required' } }
+    expect(resolveFor(s, `r1::${WSL_REPO_PATH}`)).toEqual({
+      kind: 'local',
+      context: wslContext('Ubuntu-24.04', 'r1', 'project-override')
     })
   })
 
@@ -246,7 +269,6 @@ describe('resolveWorkspaceAgentDetectionHost on a Windows host', () => {
       context: wslContext('Ubuntu-24.04', 'r1', 'project-override')
     })
   })
-  // The agent list reads the folder's own host, as main does; only launches also read its group's.
   it("keeps a folder's repo runtime when only its group names another host", () => {
     _setWslCachesForTests({ available: true, distros: ['Ubuntu'] })
     const s = store({
@@ -326,7 +348,8 @@ describe('preflight.detectAgents resolves the workspace on the host', () => {
       params: { worktreeId: `r1::${WSL_REPO_PATH}` }
     })
     expect(detectInstalledMock).toHaveBeenCalledWith(
-      wslContext('Ubuntu-24.04', 'r1', 'project-override')
+      wslContext('Ubuntu-24.04', 'r1', 'project-override'),
+      undefined
     )
     expect(response).toMatchObject({ ok: true, result: ['claude', 'codex'] })
   })

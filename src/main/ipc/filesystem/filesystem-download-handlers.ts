@@ -1,9 +1,8 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import type { FileHandle } from 'node:fs/promises'
+import { open, writeFile } from 'node:fs/promises'
 import { SshHostNotServedError } from '../../providers/ssh-host-not-served-error'
 import { sanitizeLocalDownloadFilename } from '../../local-download-filename'
-import { workspaceFsPromises } from '../../workspace-filesystem'
 import { abortWhenRendererGone } from '../renderer-lifetime-abort'
 import type { FilesystemHandlerContext } from './filesystem-handler-context'
 import {
@@ -31,7 +30,6 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
     async (_event, args: { filePath?: string; connectionId?: string }): Promise<never> => {
       validateRequiredString(args?.filePath, 'filePath')
       const connectionId = validateRequiredString(args?.connectionId, 'connectionId')
-      // Why: only SSH targets downloaded through here, and this process serves none.
       throw new SshHostNotServedError(connectionId)
     }
   )
@@ -72,10 +70,7 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
       const tempPath = createSiblingTransferPath(destinationPath, 'download')
       let promoted = false
       try {
-        await workspaceFsPromises.writeFile(
-          tempPath,
-          decodeDownloadedFileContent(content, encoding)
-        )
+        await writeFile(tempPath, decodeDownloadedFileContent(content, encoding))
         await promoteDownloadedFile(tempPath, destinationPath, existed)
         promoted = true
         return { canceled: false, destinationPath }
@@ -114,7 +109,7 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
       lifetime.signal.addEventListener('abort', onRendererGone, { once: true })
       let admitted = false
       let tempPath: string | null = null
-      let handle: FileHandle | null = null
+      let handle: Awaited<ReturnType<typeof open>> | null = null
       try {
         const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined
         const dialogResult = parentWindow
@@ -130,7 +125,7 @@ export function registerFilesystemDownloadHandlers(context: FilesystemHandlerCon
           return { canceled: true }
         }
         tempPath = createSiblingTransferPath(destinationPath, 'download')
-        handle = await workspaceFsPromises.open(tempPath, 'wx')
+        handle = await open(tempPath, 'wx')
         if (lifetime.signal.aborted) {
           return { canceled: true }
         }

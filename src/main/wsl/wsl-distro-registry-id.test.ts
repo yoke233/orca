@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseWslDistroRegistrations, readWslDistroRegistryId } from './wsl-distro-registry-id'
+import {
+  isWslDistroRegistered,
+  parseWslDistroRegistrations,
+  readWslDistroRegistryId,
+  readWslDistroRegistryIdShared,
+  resolveWslDistroName,
+  resetWslDistroRegistryIdSharedReadsForTests
+} from './wsl-distro-registry-id'
 
 const LXSS = 'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss'
 const REG_OUTPUT = [
@@ -62,6 +69,75 @@ describe('the distro registration GUID', () => {
       readWslDistroRegistryId('Ubuntu-24.04', async () => {
         throw new Error('ENOENT')
       })
+    ).resolves.toBeNull()
+  })
+})
+
+describe('readWslDistroRegistryIdShared', () => {
+  it('reads the registry once per deploy window, case-insensitively, then again after it', async () => {
+    resetWslDistroRegistryIdSharedReadsForTests()
+    let reads = 0
+    const read = async () => `guid-${++reads}`
+    let clock = 0
+    const now = () => clock
+    expect(await readWslDistroRegistryIdShared('Ubuntu', now, read)).toBe('guid-1')
+    expect(await readWslDistroRegistryIdShared('ubuntu', now, read)).toBe('guid-1')
+    clock = 31_000
+    expect(await readWslDistroRegistryIdShared('Ubuntu', now, read)).toBe('guid-2')
+    expect(reads).toBe(2)
+  })
+})
+
+describe('isWslDistroRegistered', () => {
+  const query = async () => ({ code: 0, stdout: REG_OUTPUT })
+
+  it('finds the distro by name, case-insensitively', async () => {
+    await expect(isWslDistroRegistered('UBUNTU-24.04', undefined, query)).resolves.toBe(true)
+  })
+
+  it('still finds a renamed distro by its recorded GUID, braced or not', async () => {
+    await expect(
+      isWslDistroRegistered('Ubuntu', '{0283592D-BE56-40D4-B935-3DC18C3AA007}', query)
+    ).resolves.toBe(true)
+  })
+
+  it('reports a distro gone only when neither its name nor its GUID is registered', async () => {
+    await expect(
+      isWslDistroRegistered('Ubuntu', '99999999-0000-4000-8000-000000000000', query)
+    ).resolves.toBe(false)
+  })
+
+  it('never reports gone when the registrations cannot be read', async () => {
+    await expect(
+      isWslDistroRegistered('Ubuntu', undefined, async () => ({ code: 1, stdout: '' }))
+    ).resolves.toBeNull()
+  })
+})
+
+describe('resolveWslDistroName', () => {
+  const query = async () => ({ code: 0, stdout: REG_OUTPUT })
+
+  it('finds the distro by name, case-insensitively', async () => {
+    await expect(resolveWslDistroName('UBUNTU-24.04', undefined, query)).resolves.toBe(
+      'Ubuntu-24.04'
+    )
+  })
+
+  it('names a renamed distro by its recorded GUID, braced or not', async () => {
+    await expect(
+      resolveWslDistroName('Ubuntu', '{0283592D-BE56-40D4-B935-3DC18C3AA007}', query)
+    ).resolves.toBe('Ubuntu-24.04')
+  })
+
+  it('reports a distro gone only when neither its name nor its GUID is registered', async () => {
+    await expect(
+      resolveWslDistroName('Ubuntu', '99999999-0000-4000-8000-000000000000', query)
+    ).resolves.toBe(false)
+  })
+
+  it('never reports gone when the registrations cannot be read', async () => {
+    await expect(
+      resolveWslDistroName('Ubuntu', undefined, async () => ({ code: 1, stdout: '' }))
     ).resolves.toBeNull()
   })
 })

@@ -20,12 +20,17 @@ import {
   type LaunchScopeRuntimeStore
 } from '../local-project-runtime-resolution'
 import type { RuntimeStore } from './runtime-store-contract'
+import { OrchestrationError } from './orchestration/orchestration-error'
+import {
+  agentLaunchRepairRefusal,
+  PROJECT_RUNTIME_REPAIR_REQUIRED_CODE
+} from '../../shared/project-runtime-repair-message'
 import type { TerminalWorkspaceLaunchScope } from './runtime-legacy-worker-terminal-recovery-types'
 
 type AgentLaunchRuntimeStore = Omit<LaunchScopeRuntimeStore, 'getSettings'> &
   Pick<RuntimeStore, 'getSettings'>
 
-/** The platform an agent in this workspace is quoted for; never throws, unlike the full fact. */
+/** Quoting platform; unlike full runtime resolution, this never throws. */
 export function agentLaunchPlatformForScope(
   store: LaunchScopeRuntimeStore,
   scope: TerminalWorkspaceLaunchScope
@@ -39,11 +44,7 @@ export function agentLaunchPlatformForScope(
       )
 }
 
-/**
- * The runtime an agent launched here runs in: the window's rule, except where one of the terms
- * below holds. There the answer is no runtime, so the path places the agent and the Terminal shell
- * is its PTY, as on main. Only the first term is permanent; the other two are temporary parity.
- */
+/** Apply runtime policy with UNC path authority and temporary folder/OpenCode parity exceptions below. */
 export function agentLaunchProjectRuntime(
   store: LaunchScopeRuntimeStore,
   scope: TerminalWorkspaceLaunchScope,
@@ -51,11 +52,10 @@ export function agentLaunchProjectRuntime(
 ): ProjectExecutionRuntimeResolution | undefined {
   const runtime = resolveLocalLaunchScopeRuntime(store, scope)
   const onWindowsHost = runtime?.status === 'resolved' && runtime.runtime.kind === 'windows-host'
-  // Main had no runtime here: only folders, since every local repo has a project.
+  // Folders can lack project runtime; local repositories have one.
   const mainHadNone = !resolveLocalProjectRuntimeForWorktreeId(store, scope.id)
   const pathDecides =
-    // PERMANENT fix, not parity: a `\\wsl$` cwd runs in WSL whatever the setting says. Keep it
-    // when the temporary terms go; the window adopts it in C2.
+    // UNC cwd proves WSL execution regardless of Windows-host settings; retain beyond the temporary exceptions.
     (onWindowsHost && isWslUncPath(scope.path)) ||
     // TEMPORARY (STA-10231): an explicit Windows host can't be told from the shipped default.
     (onWindowsHost && mainHadNone) ||
@@ -64,24 +64,7 @@ export function agentLaunchProjectRuntime(
   return pathDecides ? undefined : runtime
 }
 
-/** TEMPORARY parity: main checked an OpenCode model on the platform it quoted for, which in a
- *  `\\wsl$` repo not set to WSL was the Windows host. */
-export function openCodeModelCheckPlatform(
-  store: LaunchScopeRuntimeStore,
-  scope: TerminalWorkspaceLaunchScope,
-  platform: NodeJS.Platform
-): NodeJS.Platform {
-  return scope.repo && !scope.connectionId && isWslUncPath(scope.path)
-    ? executionRuntimePlatform(
-        resolveLocalProjectRuntimeForWorktreeId(store, scope.id),
-        undefined,
-        process.platform
-      )
-    : platform
-}
-
-/** The one runtime fact for an agent launched into this workspace. Throws, as the spawn did, when
- *  its runtime needs repair. */
+/** Resolve the launch runtime; report repair-required using its typed code and settings guidance. */
 export function resolveAgentLaunchRuntime(
   store: AgentLaunchRuntimeStore,
   scope: TerminalWorkspaceLaunchScope,
@@ -95,14 +78,21 @@ export function resolveAgentLaunchRuntime(
     }
   }
   const projectRuntime = agentLaunchProjectRuntime(store, scope, agent)
+  // Match spawn refusal before launching, on Windows only.
+  if (process.platform === 'win32' && projectRuntime?.status === 'repair-required') {
+    // The launch ledger preserves refusal codes only from OrchestrationError.
+    throw new OrchestrationError(
+      PROJECT_RUNTIME_REPAIR_REQUIRED_CODE,
+      agentLaunchRepairRefusal(projectRuntime.repair)
+    )
+  }
   return {
     platform: executionRuntimePlatform(projectRuntime, scope.path, process.platform),
     pty: resolveLocalPtyOptions(store.getSettings(), projectRuntime, requestedShellOverride)
   }
 }
 
-/** A new worktree of this repo, before it exists: it lands under a `\\wsl$` base folder when one
- *  is set, else on the repo's own filesystem. */
+/** New worktrees use a configured WSL base directory, otherwise the repo filesystem. */
 export function newWorktreeLaunchScope(
   repo: Repo,
   settings: Pick<GlobalSettings, 'nestWorkspaces' | 'workspaceDir'>
@@ -118,11 +108,7 @@ export function newWorktreeLaunchScope(
   }
 }
 
-/**
- * The fact for a startup agent, planned before its terminal is created. A runtime that needs repair
- * gives its error instead, so a worktree create goes on and the startup fails with that error as its
- * spawn would; that startup is quoted for the Settings shell.
- */
+/** Resolve before terminal creation; repair failure leaves worktree creation intact and quotes the failed startup for Settings shell. */
 export function resolveStartupAgentLaunchRuntime(
   store: AgentLaunchRuntimeStore,
   scope: TerminalWorkspaceLaunchScope,

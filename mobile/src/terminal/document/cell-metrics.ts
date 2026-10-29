@@ -1,5 +1,7 @@
 import type { TerminalDocumentScope } from './document-scope'
 
+// Keep pure metrics below fit/transform/overlay dependencies to avoid cycles.
+
 /** 0 until the renderer has measured a cell. */
 export function getMeasuredCellHeight(scope: TerminalDocumentScope) {
   const core = scope.term?._core

@@ -1,8 +1,6 @@
-import * as nodeFsPromises from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, dirname } from 'node:path'
-
-export type RenameCollisionFilesystem = Pick<typeof nodeFsPromises, 'lstat' | 'realpath'>
 
 function isENOENT(error: unknown): boolean {
   return (
@@ -11,8 +9,7 @@ function isENOENT(error: unknown): boolean {
 }
 
 function caseFoldFileExplorerBasename(name: string): string {
-  // Why: APFS may surface canonically equivalent Unicode names in different forms.
-  // Node has no filesystem-native collation API here, so this is best-effort.
+  // APFS can vary Unicode normalization; NFC/case folding is best-effort without native filesystem collation.
   return name.normalize('NFC').toLowerCase()
 }
 
@@ -24,8 +21,7 @@ async function isSameDirectoryEntryRename(
   oldPath: string,
   newPath: string,
   oldStat: Stats,
-  newStat: Stats,
-  filesystem: RenameCollisionFilesystem
+  newStat: Stats
 ): Promise<boolean> {
   const oldBasename = basename(oldPath)
   const newBasename = basename(newPath)
@@ -36,10 +32,7 @@ async function isSameDirectoryEntryRename(
     return true
   }
   try {
-    const [oldRealPath, newRealPath] = await Promise.all([
-      filesystem.realpath(oldPath),
-      filesystem.realpath(newPath)
-    ])
+    const [oldRealPath, newRealPath] = await Promise.all([realpath(oldPath), realpath(newPath)])
     return oldRealPath === newRealPath
   } catch (error) {
     // Preserve case-only renames for dangling symlinks, which realpath cannot resolve.
@@ -55,12 +48,11 @@ async function isSameDirectoryEntryRename(
 
 export async function assertNoClobberRenameDestinationAvailable(
   oldPath: string,
-  newPath: string,
-  filesystem: RenameCollisionFilesystem = nodeFsPromises
+  newPath: string
 ): Promise<void> {
   let newStat: Stats
   try {
-    newStat = await filesystem.lstat(newPath)
+    newStat = await lstat(newPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -68,8 +60,8 @@ export async function assertNoClobberRenameDestinationAvailable(
     throw error
   }
 
-  const oldStat = await filesystem.lstat(oldPath)
-  if (await isSameDirectoryEntryRename(oldPath, newPath, oldStat, newStat, filesystem)) {
+  const oldStat = await lstat(oldPath)
+  if (await isSameDirectoryEntryRename(oldPath, newPath, oldStat, newStat)) {
     return
   }
 

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { createWorkspaceOriginalFsPlugin } from '../build-plugins/workspace-original-fs'
 const keeperSource = resolve(import.meta.dirname, 'workspace-asar-lock-electron-keeper.cjs')
 const restartManagerScript = resolve(import.meta.dirname, 'windows-restart-manager-file-owners.ps1')
 const fixtureBase64Path = resolve(
@@ -127,6 +128,23 @@ async function startKeeper(mode, action) {
 
 beforeAll(async () => {
   mkdirSync(appSource)
+  const { build } = await import('vite')
+  await build({
+    configFile: false,
+    logLevel: 'error',
+    plugins: [createWorkspaceOriginalFsPlugin()],
+    build: {
+      ssr: true,
+      minify: false,
+      outDir: appSource,
+      emptyOutDir: false,
+      rollupOptions: {
+        input: resolve('src/shared/node-bounded-file-reader.ts'),
+        external: ['original-fs'],
+        output: { format: 'cjs', entryFileNames: 'workspace-reader.cjs' }
+      }
+    }
+  })
   copyFileSync(keeperSource, join(appSource, 'main.cjs'))
   writeFileSync(
     join(appSource, 'package.json'),
@@ -146,6 +164,22 @@ afterAll(() => {
 describe.skipIf(process.platform !== 'win32')(
   'Electron workspace ASAR filesystem lock regression',
   () => {
+    it('reads workspace archives through the built module without locking them or disabling app ASAR', async () => {
+      const keeper = await startKeeper('patched', 'read-workspace')
+      try {
+        expect(keeper.ready.appAsarSentinel).toBe('loaded-from-app-asar')
+        expect(keeper.ready.observation).toEqual({ isFile: true, sameBytes: true })
+        expect(restartManagerOwners(keeper.targetPath)).not.toContain(keeper.child.pid)
+        expect(readFileSync(keeper.targetPath)).toEqual(validAsar)
+        rmSync(keeper.targetPath)
+        const renamed = `${keeper.workspace}-renamed`
+        renameSync(keeper.workspace, renamed)
+        expect(existsSync(renamed)).toBe(true)
+      } finally {
+        await stopKeeper(keeper.child)
+      }
+    })
+
     /** @type {Array<[string, Record<string, unknown>, Record<string, unknown>]>} */
     const cases = [
       ['stat', { isFile: false, isDirectory: true }, { isFile: true, isDirectory: false }],

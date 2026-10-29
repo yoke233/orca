@@ -50,6 +50,25 @@ app.whenReady().then(async () => {
     )
   }
 
+  if (action === 'read-workspace') {
+    const {
+      readNodeFileSyncWithinLimit,
+      readNodeFileWithinLimit
+    } = require('./workspace-reader.cjs')
+    const syncRead = readNodeFileSyncWithinLimit(targetPath, 1024 * 1024, {
+      regularFileOnly: true
+    })
+    const asyncRead = await readNodeFileWithinLimit(targetPath, 1024 * 1024, {
+      regularFileOnly: true
+    })
+    publish({
+      isFile: syncRead.stats.isFile() && asyncRead.stats.isFile(),
+      sameBytes: syncRead.buffer.equals(asyncRead.buffer)
+    })
+    setInterval(() => {}, 1_000)
+    return
+  }
+
   if (action === 'watcher-metadata' || action === 'watcher-update') {
     const watcher = filesystem.watch(path.dirname(targetPath), async (_eventType, filename) => {
       if (filename?.toString() !== path.basename(targetPath)) {

@@ -14,6 +14,7 @@ import {
   runLimitedParentPrChecksRefreshes
 } from './parent-pr-checks-refresh'
 import { createParentPrChecksProjectionSelector } from './parent-pr-checks-projection-selector'
+import { selectFolderWorkspaces, selectWorktreesByRepo } from '@/store/workspace-record-selectors'
 
 type FolderWorkspacePrChecksPanelProps = {
   isVisible?: boolean
@@ -24,10 +25,10 @@ export default function FolderWorkspacePrChecksPanel({
 }: FolderWorkspacePrChecksPanelProps): React.JSX.Element {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activeWorkspaceKey = useAppStore((s) => s.activeWorkspaceKey)
-  const folderWorkspaces = useAppStore((s) => s.folderWorkspaces)
+  const folderWorkspaces = useAppStore((s) => selectFolderWorkspaces(s))
   const workspaceLineageByChildKey = useAppStore((s) => s.workspaceLineageByChildKey)
   const worktreeLineageById = useAppStore((s) => s.worktreeLineageById)
-  const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
+  const worktreesByRepo = useAppStore((s) => selectWorktreesByRepo(s))
   const repos = useAppStore((s) => s.repos)
   const settings = useAppStore((s) => s.settings)
   const fetchHostedReviewForBranch = useAppStore((s) => s.fetchHostedReviewForBranch)
@@ -108,8 +109,7 @@ export default function FolderWorkspacePrChecksPanel({
     if (candidates.length === 0) {
       return
     }
-    // Why: manual refresh should force exactly one generation; automatic
-    // refresh cycles after that must stay cache/staleness-aware.
+    // Force only the manual generation; subsequent automatic refreshes must honor cache staleness.
     const forceRefresh = manualRefreshGeneration > lastForcedManualRefreshGenerationRef.current
     if (forceRefresh) {
       lastForcedManualRefreshGenerationRef.current = manualRefreshGeneration
@@ -308,32 +308,41 @@ function formatReviewChecksHeaderSummary(summary: {
 function formatWorktreeCount(count: number): string {
   return count === 1
     ? translate(
-        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.oneWorktree',
-        '1 worktree'
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.worktreeCountLabel_one',
+        '{{count}} worktree',
+        { count }
       )
     : translate(
-        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.worktreeCount',
-        '{{value0}} worktrees',
-        { value0: count }
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.worktreeCountLabel_other',
+        '{{count}} worktrees',
+        { count }
       )
 }
 
 function formatFailingCount(count: number): string {
   return count === 1
-    ? translate('auto.components.rightSidebar.FolderWorkspacePrChecksPanel.oneFailing', '1 failing')
+    ? translate(
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.failingCountLabel_one',
+        '{{count}} failing',
+        { count }
+      )
     : translate(
-        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.failingCount',
-        '{{value0}} failing',
-        { value0: count }
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.failingCountLabel_other',
+        '{{count}} failing',
+        { count }
       )
 }
 
 function formatPendingCount(count: number): string {
   return count === 1
-    ? translate('auto.components.rightSidebar.FolderWorkspacePrChecksPanel.onePending', '1 pending')
+    ? translate(
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.pendingCountLabel_one',
+        '{{count}} pending',
+        { count }
+      )
     : translate(
-        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.pendingCount',
-        '{{value0}} pending',
-        { value0: count }
+        'auto.components.rightSidebar.FolderWorkspacePrChecksPanel.pendingCountLabel_other',
+        '{{count}} pending',
+        { count }
       )
 }

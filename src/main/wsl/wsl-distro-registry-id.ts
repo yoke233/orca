@@ -1,7 +1,4 @@
-/**
- * A distro's registration GUID (`HKCU\...\Lxss\{guid}`): stable across a rename and changed by an
- * unregister + re-import, so it tells "the same distro" from "a new one with the old name".
- */
+/** Lxss registration GUID survives rename but changes on unregister/reimport, distinguishing replacement distros with reused names. */
 import { runProcess } from '@orca/process-host'
 import { windowsSystem32Binary } from '@orca/process-host/windows-system-binary'
 
@@ -52,7 +49,7 @@ export function parseWslDistroRegistrations(output: string): WslDistroRegistrati
 export type RegQuery = (args: string[]) => Promise<{ code: number | null; stdout: string }>
 
 const defaultRegQuery: RegQuery = (args) =>
-  // One reg.exe per lookup, as `openssh-default-shell` reads the registry; never powershell.exe.
+  // Read registry with reg.exe, never PowerShell, matching openssh-default-shell.
   runProcess({
     program: windowsSystem32Binary('reg.exe'),
     args,
@@ -80,10 +77,66 @@ export async function readWslDistroRegistryId(
   distro: string,
   query: RegQuery = defaultRegQuery
 ): Promise<string | null> {
-  // WSL treats distro names case-insensitively.
   const wanted = distro.trim().toLowerCase()
   const matches = (await readWslDistroRegistrations(query))?.filter(
     (registration) => registration.distro.toLowerCase() === wanted
   )
   return matches?.length === 1 ? matches[0].id : null
+}
+
+/**
+ * The distro's current registered name: by its recorded GUID first (it survives a rename), else
+ * by name. False when neither is registered; null when the registrations can't be read.
+ */
+export async function resolveWslDistroName(
+  distro: string,
+  distroGuid?: string,
+  query: RegQuery = defaultRegQuery
+): Promise<string | false | null> {
+  const registrations = await readWslDistroRegistrations(query)
+  if (!registrations) {
+    return null
+  }
+  const guid = distroGuid?.trim().replace(/[{}]/g, '').toLowerCase()
+  const wanted = distro.trim().toLowerCase()
+  const match =
+    (guid && registrations.find((entry) => entry.id === guid)) ||
+    registrations.find((entry) => entry.distro.toLowerCase() === wanted)
+  return match ? match.distro : false
+}
+
+/**
+ * Whether the distro is registered, by name or (after a rename) by its recorded GUID; null when
+ * the registrations cannot be read.
+ */
+export async function isWslDistroRegistered(
+  distro: string,
+  distroGuid?: string,
+  query: RegQuery = defaultRegQuery
+): Promise<boolean | null> {
+  const name = await resolveWslDistroName(distro, distroGuid, query)
+  return name === null ? null : name !== false
+}
+
+const SHARED_READ_TTL_MS = 30_000
+const sharedReads = new Map<string, { at: number; id: Promise<string | null> }>()
+
+/** Share one registry read within a deploy; discard afterward so unregister/reimport gets a new identity next time. */
+export function readWslDistroRegistryIdShared(
+  distro: string,
+  now: () => number = Date.now,
+  read: (distro: string) => Promise<string | null> = readWslDistroRegistryId
+): Promise<string | null> {
+  const key = distro.trim().toLowerCase()
+  const cached = sharedReads.get(key)
+  if (cached && now() - cached.at < SHARED_READ_TTL_MS) {
+    return cached.id
+  }
+  const id = read(distro).catch(() => null)
+  sharedReads.set(key, { at: now(), id })
+  return id
+}
+
+export function resetWslDistroRegistryIdSharedReadsForTests(): void {
+  sharedReads.clear()
 }

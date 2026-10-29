@@ -25,7 +25,7 @@ import {
   TabSwitch,
   Upload,
   Wait
-} from './browser-schemas'
+} from '../../../../shared/rpc-contract/browser-params'
 import {
   BrowserOpenUrlParams,
   BrowserTabCreateParams
@@ -94,7 +94,7 @@ export const BROWSER_CORE_METHODS = [
     name: 'browser.eval',
     permission: 'workspace',
     params: Eval,
-    handler: async (params, { runtime }) => runtime.browserEval(params)
+    handler: async (params, { runtime, signal }) => runtime.browserEval(params, signal)
   }),
   defineMethod({
     name: 'browser.tabList',

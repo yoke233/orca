@@ -1,17 +1,9 @@
-/**
- * The export's path-rewrite stage over the fields in orcad-migration-path-fields.ts. A source whose
- * paths differ on the destination (a local WSL distro reached through `\\wsl.localhost`) supplies a
- * rewriter; the relay-era SSH host uses the identity, which leaves the payload byte-identical.
- */
-import type { OrcadMigrationCatalogPayload } from '../../shared/orcad-migration-manifest'
-import { isRecord } from '../../shared/orcad-migration-manifest-fields'
+/** Rewrite differing source/destination paths, such as WSL via \wsl.localhost; SSH identity rewriting must preserve payload bytes. */
+import type { OrcadMigrationCatalogPayload } from '../../shared/orcad-migration/orcad-migration-manifest'
+import { isRecord } from '../../shared/orcad-migration/orcad-migration-manifest-fields'
 import { PTY_SESSION_ID_SEPARATOR } from '../../shared/pty-session-id-format'
 import { parseWorkspaceKey } from '../../shared/workspace-scope'
-import {
-  FOLDER_WORKSPACE_INSTANCE_SEPARATOR,
-  splitWorktreeId,
-  WORKTREE_ID_SEPARATOR
-} from '../../shared/worktree/id'
+import { rewriteWorktreeIdPath } from '../../shared/worktree/id'
 import {
   ORCAD_MIGRATION_PATH_FIELDS,
   type OrcadMigrationPathFieldKind,
@@ -33,12 +25,13 @@ export function rewriteOrcadMigrationPayloadPaths(
   rewriter: OrcadMigrationPathRewriter
 ): OrcadMigrationCatalogPayload {
   const copy = structuredClone(payload)
-  // Why: SSH exports run this on every stage and commit check; the identity changes nothing.
+  // Stage/commit checks repeat identity exports; skip traversal when every path stays unchanged.
   if (rewriter === IDENTITY_ORCAD_MIGRATION_PATH_REWRITER) {
     return copy
   }
   for (const field of ORCAD_MIGRATION_PATH_FIELDS) {
-    const map = (value: string): string => rewriteValue(value, field.kind, rewriter)
+    const map = (value: string): string =>
+      rewriteOrcadMigrationPathValue(value, field.kind, rewriter)
     visit(copy, parseFieldLocation(field.at), map)
   }
   return copy
@@ -115,14 +108,15 @@ function renameKeys(node: Record<string, unknown>, map: (value: string) => strin
   }
 }
 
-function rewriteValue(
+/** One value of `kind`; anything the rewriter doesn't recognise comes back unchanged. */
+export function rewriteOrcadMigrationPathValue(
   value: string,
   kind: OrcadMigrationPathFieldKind,
   rewriter: OrcadMigrationPathRewriter
 ): string {
   switch (kind) {
     case 'worktree-id':
-      return rewriteWorktreeId(value, rewriter)
+      return rewriteOrcadMigrationWorktreeId(value, rewriter)
     case 'owner-key':
       return rewriteOwnerKey(value, rewriter)
     case 'pty-session-id':
@@ -137,20 +131,11 @@ function rewriteValue(
   }
 }
 
-function rewriteWorktreeId(value: string, rewriter: OrcadMigrationPathRewriter): string {
-  const parsed = splitWorktreeId(value)
-  if (!parsed || !parsed.repoId || !parsed.worktreePath) {
-    return value
-  }
-  const suffixAt = parsed.worktreePath.lastIndexOf(FOLDER_WORKSPACE_INSTANCE_SEPARATOR)
-  const instanceId = parsed.worktreePath.slice(
-    suffixAt + FOLDER_WORKSPACE_INSTANCE_SEPARATOR.length
-  )
-  const suffix =
-    suffixAt > 0 && /^[0-9a-f-]{36}$/.test(instanceId) ? parsed.worktreePath.slice(suffixAt) : ''
-  const path = parsed.worktreePath.slice(0, parsed.worktreePath.length - suffix.length)
-  const mapped = rewriter.path(path, 'absolute')
-  return mapped === path ? value : `${parsed.repoId}${WORKTREE_ID_SEPARATOR}${mapped}${suffix}`
+export function rewriteOrcadMigrationWorktreeId(
+  value: string,
+  rewriter: OrcadMigrationPathRewriter
+): string {
+  return rewriteWorktreeIdPath(value, (path) => rewriter.path(path, 'absolute'))
 }
 
 function rewriteOwnerKey(value: string, rewriter: OrcadMigrationPathRewriter): string {
@@ -159,10 +144,10 @@ function rewriteOwnerKey(value: string, rewriter: OrcadMigrationPathRewriter): s
     return value
   }
   if (scope?.type === 'worktree') {
-    const mapped = rewriteWorktreeId(scope.worktreeId, rewriter)
+    const mapped = rewriteOrcadMigrationWorktreeId(scope.worktreeId, rewriter)
     return mapped === scope.worktreeId ? value : `worktree:${mapped}`
   }
-  return rewriteWorktreeId(value, rewriter)
+  return rewriteOrcadMigrationWorktreeId(value, rewriter)
 }
 
 function rewritePtySessionId(value: string, rewriter: OrcadMigrationPathRewriter): string {
@@ -187,7 +172,7 @@ function rewriteEditorFileId(value: string, rewriter: OrcadMigrationPathRewriter
     return value
   }
   const [worktreeId, runtime, filePath] = decoded
-  const mappedWorktreeId = rewriteWorktreeId(worktreeId, rewriter)
+  const mappedWorktreeId = rewriteOrcadMigrationWorktreeId(worktreeId, rewriter)
   const mappedFilePath = rewriter.path(filePath, 'absolute')
   if (mappedWorktreeId === worktreeId && mappedFilePath === filePath) {
     return value

@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import { rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { workspaceFsPromises } from '../../workspace-filesystem'
-import { isENOENT } from '../filesystem-path-containment'
+import { isENOENT } from './filesystem-path-containment'
 
 export function decodeDownloadedFileContent(content: string, encoding: 'utf8' | 'base64'): Buffer {
   return encoding === 'base64' ? Buffer.from(content, 'base64') : Buffer.from(content, 'utf8')
 }
 
 export function createSiblingTransferPath(destinationPath: string, suffix: string): string {
-  // Why: promotion renames must stay on the destination volume, so transfer paths remain siblings.
+  // Keep staging beside destination so promotion rename stays on one volume.
   return join(dirname(destinationPath), `.${randomUUID()}.${suffix}`)
 }
 
@@ -16,14 +16,14 @@ export async function cleanupLocalTransferPath(filePath: string | null): Promise
   if (!filePath) {
     return
   }
-  await workspaceFsPromises.rm(filePath, { force: true }).catch(() => {})
+  await rm(filePath, { force: true }).catch(() => {})
 }
 
 export async function inspectDownloadDestination(
   destinationPath: string
 ): Promise<{ existed: boolean }> {
   try {
-    const destinationStat = await workspaceFsPromises.stat(destinationPath)
+    const destinationStat = await stat(destinationPath)
     if (destinationStat.isDirectory()) {
       throw new Error('Cannot download to a directory')
     }
@@ -38,7 +38,7 @@ export async function inspectDownloadDestination(
 
 export async function assertDestinationStillUnclaimed(destinationPath: string): Promise<void> {
   try {
-    await workspaceFsPromises.stat(destinationPath)
+    await stat(destinationPath)
   } catch (error) {
     if (isENOENT(error)) {
       return
@@ -55,20 +55,20 @@ export async function promoteDownloadedFile(
 ): Promise<void> {
   if (!destinationExisted) {
     await assertDestinationStillUnclaimed(destinationPath)
-    await workspaceFsPromises.rename(tempPath, destinationPath)
+    await rename(tempPath, destinationPath)
     return
   }
 
   const backupPath = createSiblingTransferPath(destinationPath, 'backup')
   let backupCreated = false
   try {
-    await workspaceFsPromises.rename(destinationPath, backupPath)
+    await rename(destinationPath, backupPath)
     backupCreated = true
-    await workspaceFsPromises.rename(tempPath, destinationPath)
+    await rename(tempPath, destinationPath)
     await cleanupLocalTransferPath(backupPath)
   } catch (error) {
     if (backupCreated) {
-      await workspaceFsPromises.rename(backupPath, destinationPath).catch(() => {})
+      await rename(backupPath, destinationPath).catch(() => {})
     }
     throw error
   }
