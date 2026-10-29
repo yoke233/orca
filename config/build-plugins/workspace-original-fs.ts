@@ -88,9 +88,15 @@ export function createWorkspaceOriginalFsPlugin(options: { root?: string } = {})
       // Electron-vite externalizes builtins before resolveId runs. Let only scoped fs
       // imports reach our resolver, preserving every other dependency externalization.
       input.external = (source, importer, isResolved) => {
-        if (source === 'original-fs') return true
-        if (source === PROMISES_MODULE_ID || isWorkspaceImport(source, importer)) return false
-        if (typeof external === 'function') return external(source, importer, isResolved)
+        if (source === 'original-fs') {
+          return true
+        }
+        if (source === PROMISES_MODULE_ID || isWorkspaceImport(source, importer)) {
+          return false
+        }
+        if (typeof external === 'function') {
+          return external(source, importer, isResolved)
+        }
         return entries.some((entry) =>
           typeof entry === 'string' ? entry === source : entry.test(source)
         )
@@ -98,14 +104,20 @@ export function createWorkspaceOriginalFsPlugin(options: { root?: string } = {})
       return input
     },
     resolveId(source, importer) {
-      if (source === PROMISES_MODULE_ID) return PROMISES_MODULE_ID
-      if (!isWorkspaceImport(source, importer)) return null
+      if (source === PROMISES_MODULE_ID) {
+        return PROMISES_MODULE_ID
+      }
+      if (!isWorkspaceImport(source, importer)) {
+        return null
+      }
       return source.endsWith('/promises')
         ? PROMISES_MODULE_ID
         : { id: 'original-fs', external: true }
     },
     load(id) {
-      if (id !== PROMISES_MODULE_ID) return null
+      if (id !== PROMISES_MODULE_ID) {
+        return null
+      }
       // Enumerate the build Node's real promises API, including constants, rather than
       // maintaining a partial export list. Bind directly to Electron's unpatched API;
       // no copied object, wrappers or per-operation allocations are introduced.
