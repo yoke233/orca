@@ -1,4 +1,5 @@
 import { createPackage } from '@electron/asar'
+import { runProcess } from '@orca/process-host'
 import { spawn, spawnSync } from 'node:child_process'
 import electronPath from 'electron'
 import {
@@ -164,6 +165,27 @@ afterAll(() => {
 describe.skipIf(process.platform !== 'win32')(
   'Electron workspace ASAR filesystem lock regression',
   () => {
+    it('loads the same built reader in a plain Node daemon runtime', async () => {
+      const targetPath = join(suiteRoot, 'node-workspace.asar')
+      writeFileSync(targetPath, validAsar)
+      const result = await runProcess({
+        program: 'node',
+        args: [
+          '--eval',
+          `const { readNodeFileWithinLimit } = require(${JSON.stringify(join(appSource, 'workspace-reader.cjs'))});
+          readNodeFileWithinLimit(${JSON.stringify(targetPath)}, 1024 * 1024, { regularFileOnly: true })
+            .then(({ buffer, stats }) => console.log(JSON.stringify({ isFile: stats.isFile(), bytes: buffer.toString('base64') })))
+            .catch((error) => { console.error(error); process.exitCode = 1; });`
+        ],
+        timeoutMs: 15_000
+      })
+      expect(result.code, result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout)).toEqual({
+        isFile: true,
+        bytes: validAsar.toString('base64')
+      })
+    })
+
     it('reads workspace archives through the built module without locking them or disabling app ASAR', async () => {
       const keeper = await startKeeper('patched', 'read-workspace')
       try {

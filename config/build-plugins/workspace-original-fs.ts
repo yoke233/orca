@@ -1,4 +1,4 @@
-import { promises as nodeFsPromises } from 'node:fs'
+import nodeFs, { promises as nodeFsPromises } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import type { Plugin } from 'vite'
 
@@ -51,6 +51,7 @@ export const WORKSPACE_ORIGINAL_FS_IMPORTERS = [
   'src/shared/windows-retry-file-operations.ts'
 ] as const
 
+const FILESYSTEM_MODULE_ID = '\0orca:workspace-original-fs'
 const PROMISES_MODULE_ID = '\0orca:workspace-original-fs/promises'
 const workspaceImporters: Record<string, true> = Object.fromEntries(
   WORKSPACE_ORIGINAL_FS_IMPORTERS.map((importer) => [importer, true as const])
@@ -91,7 +92,11 @@ export function createWorkspaceOriginalFsPlugin(options: { root?: string } = {})
         if (source === 'original-fs') {
           return true
         }
-        if (source === PROMISES_MODULE_ID || isWorkspaceImport(source, importer)) {
+        if (
+          source === FILESYSTEM_MODULE_ID ||
+          source === PROMISES_MODULE_ID ||
+          isWorkspaceImport(source, importer)
+        ) {
           return false
         }
         if (typeof external === 'function') {
@@ -104,17 +109,30 @@ export function createWorkspaceOriginalFsPlugin(options: { root?: string } = {})
       return input
     },
     resolveId(source, importer) {
-      if (source === PROMISES_MODULE_ID) {
-        return PROMISES_MODULE_ID
+      if (source === FILESYSTEM_MODULE_ID || source === PROMISES_MODULE_ID) {
+        return source
       }
       if (!isWorkspaceImport(source, importer)) {
         return null
       }
-      return source.endsWith('/promises')
-        ? PROMISES_MODULE_ID
-        : { id: 'original-fs', external: true }
+      return source.endsWith('/promises') ? PROMISES_MODULE_ID : FILESYSTEM_MODULE_ID
     },
     load(id) {
+      if (id === FILESYSTEM_MODULE_ID) {
+        // Shared chunks also run in Node daemons/workers, where original-fs is unavailable.
+        const exports = Object.keys(nodeFs)
+          .sort()
+          .map((name) => `export const ${name} = filesystem[${JSON.stringify(name)}];`)
+        return [
+          "import nodeFs from 'node:fs';",
+          "import { createRequire } from 'node:module';",
+          'let filesystem;',
+          "try { filesystem = createRequire(__filename)('original-fs'); }",
+          "catch (error) { if (process.type === 'browser') throw error; filesystem = nodeFs; }",
+          'export default filesystem;',
+          ...exports
+        ].join('\n')
+      }
       if (id !== PROMISES_MODULE_ID) {
         return null
       }
@@ -125,8 +143,8 @@ export function createWorkspaceOriginalFsPlugin(options: { root?: string } = {})
         .sort()
         .map((name) => `export const ${name} = promises[${JSON.stringify(name)}];`)
       return [
-        "import originalFs from 'original-fs';",
-        'const promises = originalFs.promises;',
+        `import filesystem from ${JSON.stringify(FILESYSTEM_MODULE_ID)};`,
+        'const promises = filesystem.promises;',
         'export default promises;',
         ...exports
       ].join('\n')
